@@ -25,7 +25,8 @@ The photos are still in there. This is the recovery aircraft.
 pip install -r requirements.txt
 ```
 
-Python 3.10+. Windows, macOS, Linux. No accounts, no API keys, no sign-ups.
+Python 3.10+. Windows, macOS, Linux. No APIs. No logins. No encryption —
+exactly how Webshots ran things, which you probably now regret.
 
 ## Cleared for departure
 
@@ -38,6 +39,7 @@ python resurrector.py pull   yourscreenname     # bring it home
 original name and photo count. `pull` recovers everything and writes a
 **`gallery.html`** contact sheet: open it in a browser and you're looking at
 your albums again, original titles, original captions, twenty years later.
+Yes, including the captions. You were very funny in 2004.
 
 ![search — the flight-strip board](assets/screenshot_search.png)
 
@@ -56,7 +58,8 @@ python resurrector.py pull   yourscreenname -j 6        # more concurrency (max 
 
 `--deep` runs a CDX prefix sweep over every archived variant of your profile —
 pagination pages, the date-sorted view, every site redesign from 2002 to 2013 —
-and resurrects albums you deleted years before the site died.
+and resurrects albums you deleted years before the site died. You deleted them.
+You moved on. The Wayback Machine did neither.
 
 ## How it actually works
 
@@ -83,10 +86,10 @@ against live archive data:
   resolves every photo through its page. (Naive URL derivation — what every
   dead Webshots scraper attempted — silently misses almost everything.)
 - **The 2002–2005 era is a different aircraft.** Old thumbnails ride
-  `thumbN.webshots.com` with per-image load-balancer host digits, old albums
-  paginate by path segment, and old full-size images live at
-  `community.webshots.com/sym/imageN/…` — which *is* derivable, from the
-  thumbnail's path digit. Paisley Ponytail speaks both eras.
+  `thumbN.webshots.com` with per-image load-balancer host digits (2002 was a
+  lawless time), old albums paginate by path segment, and old full-size images
+  live at `community.webshots.com/sym/imageN/…` — which *is* derivable, from
+  the thumbnail's path digit. Paisley Ponytail speaks both eras.
 
 Every photo descends a fallback ladder — real full-size, real 800×600, derived
 guesses, and finally the archived thumbnail itself — so you always land with
@@ -103,7 +106,7 @@ guesses, and finally the archived thumbnail itself — so you always land with
 | `UPGRADED FS` | A previous 800×600 was replaced by the located original |
 | `THUMB ONLY` | Only the 100×75 thumbnail survived the crawl |
 | `AT GATE` | Already on disk from an earlier run |
-| `MISSED APCH` | Genuinely not in the archive — nothing to recover |
+| `MISSED APCH` | Genuinely not in the archive — you can't land a plane that never took off |
 
 Everything lands in `output/yourname/` — one folder per album, named by the
 album's original title, with `manifest.json` (per-photo records, variants,
@@ -116,7 +119,8 @@ captions) and the `gallery.html` contact sheet alongside.
 - **Account deleted before 2012** — sometimes. Regular Wayback crawls ran from
   2002 on; `--deep` finds those albums, but early-era image coverage is patchy.
   Expect partial albums and thumbnails.
-- **Albums set to private** — never archived. No tool can recover them.
+- **Albums set to private** — never archived. No tool can recover them. Your
+  secrets died with the site; the one privacy feature that actually worked.
 
 ## Etiquette (read before filing complaints about speed)
 
