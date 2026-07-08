@@ -1,0 +1,4 @@
+httpx
+aiohttp
+rich
+beautifulsoup4

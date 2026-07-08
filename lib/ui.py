@@ -1,7 +1,21 @@
-"""Terminal display layer for Webshots Resurrector."""
+"""Terminal display layer for Webshots Resurrector.
 
+Tower-cab aesthetic: Zulu-clock comms log, flight strips, radar-green
+scope colors.  Every line still says what it means — jargon decorates,
+it never obscures.
+"""
+
+import sys
 from datetime import datetime, timezone
 
+# Windows consoles default to a legacy codepage (cp1252) that can't encode
+# the banner's block glyphs; force UTF-8 before rich binds to the streams.
+if sys.platform == "win32":
+    for _stream in (sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+
+from rich import box
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -17,24 +31,37 @@ from rich.theme import Theme
 
 THEME = Theme(
     {
-        "phase": "bold cyan",
-        "ok": "green",
-        "warn": "yellow",
+        "phase": "bold bright_green",
+        "ok": "bold green",
+        "warn": "bold yellow",
         "err": "bold red",
         "dim": "dim",
         "target": "bold white",
         "heading": "bold white",
+        "scope": "green",
+        "amber": "yellow",
+        "zulu": "dim green",
+        "strip": "bold black on green",
+        "brand": "bold white",
     }
 )
 
 console = Console(theme=THEME, highlight=False)
 
+VERSION = "1.1.0"
+
+
+def _zulu() -> str:
+    """Tower clock — every transmission gets a Zulu timestamp."""
+    return datetime.now(timezone.utc).strftime("%H:%M:%SZ")
+
+
 # ── Banner ──────────────────────────────────────────────────────────────
 
 LOGO_WEBSHOTS = (
-    "  [bold cyan]█ █ █▀▀ █▀▄ █▀▀ █ █ █▀█ ▀█▀ █▀▀[/]\n"
-    "  [bold cyan]█▄█ █▀▀ █▀▄ ▀▀█ █▀█ █ █  █  ▀▀█[/]\n"
-    "  [bold cyan]▀ ▀ ▀▀▀ ▀▀  ▀▀▀ ▀ ▀ ▀▀▀  ▀  ▀▀▀[/]"
+    "  [bold green]█ █ █▀▀ █▀▄ █▀▀ █ █ █▀█ ▀█▀ █▀▀[/]\n"
+    "  [bold green]█▄█ █▀▀ █▀▄ ▀▀█ █▀█ █ █  █  ▀▀█[/]\n"
+    "  [bold green]▀ ▀ ▀▀▀ ▀▀  ▀▀▀ ▀ ▀ ▀▀▀  ▀  ▀▀▀[/]"
 )
 
 LOGO_RESURRECTOR = (
@@ -43,82 +70,120 @@ LOGO_RESURRECTOR = (
     "  [bold white]▀ ▀ ▀▀▀ ▀▀▀ ▀▀▀ ▀ ▀ ▀ ▀ ▀▀▀ ▀▀▀  ▀  ▀▀▀ ▀ ▀[/]"
 )
 
-VERSION = "1.0.0"
+SCANLINE = "[dim green]" + "▔" * 60 + "[/]"
 
 
 def show_banner():
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%MZ")
     body = (
         f"{LOGO_WEBSHOTS}\n"
         f"{LOGO_RESURRECTOR}\n\n"
-        f"  [dim]v{VERSION}  |  Internet Archive Photo Recovery System[/]\n"
-        f"  [dim]{now}[/]"
+        f"  {SCANLINE}\n"
+        f"  [scope]INTERNET ARCHIVE PHOTO RECOVERY SYSTEM[/]"
+        f"  [dim]│[/]  [scope]v{VERSION}[/]\n"
+        f"  [dim]2,437 MEGAWARCS ON FREQUENCY ▪ 105.9 TB ▪"
+        f" WAYBACK RADAR ONLINE[/]\n"
+        f"  {SCANLINE}\n"
+        f"  [brand]TAILSTRIKE STUDIOS[/] [dim]×[/] [brand]ASH AIRFOIL[/]"
+        f" [dim]// coldbricks // {now}[/]"
     )
     console.print()
-    console.print(Panel(body, border_style="cyan", padding=(1, 1)))
+    console.print(
+        Panel(body, border_style="green", box=box.DOUBLE, padding=(1, 1))
+    )
     console.print()
 
 
-# ── Phase logging ───────────────────────────────────────────────────────
+# ── Comms log ───────────────────────────────────────────────────────────
+#
+#  Every line reads like a tower transmission:
+#    21:04:11Z  RECON  ▸ radar contact: bexbee12
+
+
+def _xmit(style: str, tag: str, msg: str):
+    console.print(f" [zulu]{_zulu()}[/]  [{style}]{tag:<5}[/] [dim]▸[/] {msg}")
 
 
 def phase(tag, msg):
-    console.print(f" [phase]\\[{tag}][/] {msg}")
+    _xmit("phase", tag, msg)
 
 
 def success(tag, msg):
-    console.print(f" [ok]\\[{tag}][/] {msg}")
+    _xmit("ok", tag, msg)
 
 
 def warn(tag, msg):
-    console.print(f" [warn]\\[{tag}][/] {msg}")
+    _xmit("warn", tag, msg)
 
 
 def fail(tag, msg):
-    console.print(f" [err]\\[{tag}][/] {msg}")
+    _xmit("err", tag, msg)
 
 
 def detail(msg):
-    console.print(f"         {msg}")
+    console.print(f"                    {msg}")
+
+
+# ── Download callouts ───────────────────────────────────────────────────
+#
+#  fs  = full-size original landed        → LANDED  FS
+#  ph  = 800x600 fallback landed          → LANDED  PH
+#  skip = already on disk                 → AT GATE
+#  fail = both variants unrecoverable     → MISSED APCH
 
 
 def dl_ok(variant, size, filename):
-    v = f"[ok]{variant}[/]"
-    console.print(f"         {v}  {size:>9,}B  [dim]{filename}[/]")
+    if variant == "fs":
+        v = "[ok]LANDED  FS[/]"
+    else:
+        v = "[amber]LANDED  PH[/]"
+    console.print(
+        f" [zulu]{_zulu()}[/]   {v}  {size:>9,}B  [dim]{filename}[/]"
+    )
 
 
 def dl_skip(filename):
-    console.print(f"         [dim]--  EXISTING   {filename}[/]")
+    console.print(
+        f" [zulu]{_zulu()}[/]   [dim]AT GATE      already on disk  {filename}[/]"
+    )
 
 
 def dl_fail(filename):
-    console.print(f"         [err]--    FAILED[/]   {filename}")
+    console.print(
+        f" [zulu]{_zulu()}[/]   [err]MISSED APCH[/]  not recoverable  [dim]{filename}[/]"
+    )
 
 
-# ── Tables ──────────────────────────────────────────────────────────────
+# ── Flight strips (album table) ─────────────────────────────────────────
 
 
 def show_albums_table(albums):
-    """Display album scan results.
+    """Display album scan results as a flight-strip board.
 
     albums: list of (url, category, photo_count)
     """
     table = Table(
         show_header=True,
-        header_style="bold cyan",
+        header_style="strip",
         padding=(0, 1),
-        border_style="dim",
+        border_style="dim green",
+        box=box.HEAVY_HEAD,
+        title="[bold green]▮▮ FLIGHT STRIPS — ALBUMS ON SCOPE ▮▮[/]",
+        title_justify="left",
     )
-    table.add_column("#", style="dim", width=4, justify="right")
-    table.add_column("Album ID", style="white", max_width=38)
-    table.add_column("Category", style="cyan", max_width=14)
-    table.add_column("Photos", style="ok", justify="right", width=7)
+    table.add_column("STRIP", style="dim", width=5, justify="right")
+    table.add_column("SQUAWK · ALBUM ID", style="scope", max_width=38)
+    table.add_column("SECTOR", style="bold green", max_width=14)
+    table.add_column("PHOTOS", style="bold white", justify="right", width=7)
 
     for i, (url, category, count) in enumerate(albums, 1):
         album_id = url.split("/album/")[1] if "/album/" in url else url[-30:]
-        table.add_row(str(i), album_id[:38], category[:14], str(count))
+        table.add_row(f"{i:03d}", album_id[:38], category[:14].upper(), str(count))
 
     console.print(table)
+
+
+# ── Debrief (final summary) ─────────────────────────────────────────────
 
 
 def show_summary(stats):
@@ -132,25 +197,29 @@ def show_summary(stats):
     total_found = ok + bad + skip
 
     table = Table(show_header=False, padding=(0, 2), box=None)
-    table.add_column("K", style="dim", width=14)
+    table.add_column("K", style="dim green", width=22)
     table.add_column("V", style="bold white")
 
-    table.add_row("Found", str(total_found))
-    table.add_row("Downloaded", f"[ok]{ok}[/]")
+    table.add_row("TRAFFIC (photos found)", str(total_found))
+    table.add_row("RECOVERED (landed)", f"[ok]{ok}[/]")
     if bad:
-        table.add_row("Failed", f"[err]{bad}[/]")
+        table.add_row("MISSED APPROACHES", f"[err]{bad}[/]")
     if skip:
-        table.add_row("Skipped", f"[dim]{skip}[/]")
-    table.add_row("Total Size", f"{stats['bytes'] / 1024 / 1024:.1f} MB")
-    table.add_row("Duration", f"{stats['elapsed']:.1f}s")
+        table.add_row("AT GATE (already had)", f"[dim]{skip}[/]")
+    table.add_row("PAYLOAD", f"{stats['bytes'] / 1024 / 1024:.1f} MB")
+    table.add_row("BLOCK TIME", f"{stats['elapsed']:.1f}s")
     if stats["elapsed"] > 0:
-        table.add_row("Rate", f"{ok / stats['elapsed']:.2f} photos/sec")
-    table.add_row("Output", stats["output_dir"])
+        table.add_row("RECOVERY RATE", f"{ok / stats['elapsed']:.2f} photos/sec")
+    table.add_row("HANGAR (output dir)", stats["output_dir"])
 
-    border = "green" if bad == 0 else "yellow"
-    title = "[bold]OPERATION COMPLETE[/]"
+    if bad == 0:
+        border, title = "green", "[bold green]■ OPERATIONS NORMAL — RUNWAY CLEAR ■[/]"
+    else:
+        border, title = "yellow", "[bold yellow]■ OPERATION COMPLETE — WITH MISSES ■[/]"
     console.print()
-    console.print(Panel(table, title=title, border_style=border, padding=(1, 2)))
+    console.print(
+        Panel(table, title=title, border_style=border, box=box.DOUBLE, padding=(1, 2))
+    )
 
 
 # ── Progress bars ───────────────────────────────────────────────────────
@@ -159,7 +228,7 @@ def show_summary(stats):
 def make_progress(transient=False):
     return Progress(
         SpinnerColumn(spinner_name="dots"),
-        TextColumn("[bold cyan]{task.description}"),
+        TextColumn("[bold green]{task.description}"),
         BarColumn(bar_width=30, complete_style="green", finished_style="bold green"),
         TextColumn("[bold]{task.completed}[/]/{task.total}"),
         TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),

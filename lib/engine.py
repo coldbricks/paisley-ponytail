@@ -141,13 +141,32 @@ class Engine:
 
     # ── Wayback CDX API ─────────────────────────────────────────────
 
-    async def cdx_search(self, url: str, limit: int = -1) -> list[list[str]]:
+    async def cdx_search(
+        self,
+        url: str,
+        match_type: str | None = None,
+        collapse: str | None = None,
+        status_filter: str | None = None,
+        limit: int = 0,
+    ) -> list[list[str]]:
         """Query Wayback CDX API.
 
         Returns list of rows: [urlkey, timestamp, original, mimetype,
         statuscode, digest, length].  Header row is stripped.
+
+        NOTE: never pass a negative limit — the CDX API treats limit=-N
+        as "last N rows", which silently truncates results.
         """
-        r = await self._fetch(f"{CDX_API}?url={url}&output=json&limit={limit}")
+        query = f"{CDX_API}?url={url}&output=json"
+        if match_type:
+            query += f"&matchType={match_type}"
+        if collapse:
+            query += f"&collapse={collapse}"
+        if status_filter:
+            query += f"&filter=statuscode:{status_filter}"
+        if limit > 0:
+            query += f"&limit={limit}"
+        r = await self._fetch(query)
         if not r:
             return []
         text = r.text.strip()
@@ -165,6 +184,10 @@ class Engine:
         return [r[1] for r in reversed(rows)]
 
     # ── Profile scraping ────────────────────────────────────────────
+
+    async def load_page(self, original_url: str, timestamp: str) -> str | None:
+        """Fetch any original URL through Wayback playback at a timestamp."""
+        return await self._fetch_text(f"{WAYBACK}/{timestamp}/{original_url}")
 
     async def load_profile(
         self, username: str, timestamp: str | None = None
@@ -191,9 +214,11 @@ class Engine:
 
         Returns [(original_url, category_subdomain, album_id), ...].
         """
+        # Wayback rewrites hrefs both absolute and host-relative (/web/TS/...);
+        # album IDs must not swallow ?start= pagination queries.
         pattern = (
-            r'href="https?://web\.archive\.org/web/\d+/'
-            r"(https?://([^/\"]*?)\.webshots\.[^/\"]+/album/([^\"#]+))"
+            r'href="(?:https?://web\.archive\.org)?/web/\d+/'
+            r"(https?://([^/\"]*?)\.webshots\.[^/\"]+/album/([^\"#?]+))"
         )
         seen: set[str] = set()
         results: list[tuple[str, str, str]] = []
@@ -206,13 +231,45 @@ class Engine:
     # ── Album scraping ──────────────────────────────────────────────
 
     async def load_album(
-        self, album_url: str, timestamp: str
+        self,
+        album_url: str,
+        timestamp: str,
+        follow_pagination: bool = True,
+        max_pages: int = 50,
     ) -> list[tuple[str, str]]:
-        """Load album page, return [(wayback_ts, thumb_url), ...]."""
-        html = await self._fetch_text(f"{WAYBACK}/{timestamp}/{album_url}")
-        if not html:
-            return []
-        return self._extract_thumbnails(html)
+        """Load album page(s), return [(wayback_ts, thumb_url), ...].
+
+        Album grids paginate via ?start=N — page 1 shows at most ~42
+        thumbnails, so every discovered start value is fetched and the
+        thumbnails unioned.  Without this, large albums silently lose
+        every photo past the first page.
+        """
+        thumbs: dict[str, str] = {}  # thumb_url -> wayback_ts
+        todo: set[int | None] = {None}
+        done: set[int | None] = set()
+
+        while todo and len(done) < max_pages:
+            start = todo.pop()
+            done.add(start)
+            page_url = album_url if start is None else f"{album_url}?start={start}"
+            html = await self._fetch_text(f"{WAYBACK}/{timestamp}/{page_url}")
+            if not html:
+                continue
+            for ts, url in self._extract_thumbnails(html):
+                thumbs.setdefault(url, ts)
+            if follow_pagination:
+                for s in self._extract_starts(html, album_url):
+                    if s not in done:
+                        todo.add(s)
+
+        return [(ts, url) for url, ts in thumbs.items()]
+
+    @staticmethod
+    def _extract_starts(html: str, album_url: str) -> set[int]:
+        """Find ?start=N pagination values pointing at this album."""
+        album_id = album_url.rsplit("/album/", 1)[-1]
+        pattern = rf'/album/{re.escape(album_id)}\?(?:[^"\'>]*&(?:amp;)?)?start=(\d+)'
+        return {int(m) for m in re.findall(pattern, html)}
 
     @staticmethod
     def _extract_thumbnails(html: str) -> list[tuple[str, str]]:
@@ -221,7 +278,7 @@ class Engine:
         Handles both /s/thumbN/ and /t/NN/ path formats.
         """
         pattern = (
-            r"https?://web\.archive\.org/web/(\d+)im_/"
+            r"(?:https?://web\.archive\.org)?/web/(\d+)im_/"
             r"(https?://thumb\d+\.webshots\.net/"
             r"(?:s/thumb\d+|t)/"
             r"[^\"'<>\s]+_th\.jpg)"
@@ -233,6 +290,40 @@ class Engine:
                 seen.add(url)
                 results.append((ts, url))
         return results
+
+    # ── Deep discovery (CDX prefix enumeration) ─────────────────────
+
+    async def discover_profile_pages(
+        self, username: str
+    ) -> list[tuple[str, list[str]]]:
+        """Enumerate every archived profile album-list page for a user.
+
+        The raw freeze-frame megawarcs are access-restricted (401) and the
+        old search index item is dark, but their contents were ingested
+        into the Wayback Machine — a CDX prefix query surfaces profile
+        pagination pages (/user/NAME/2) and the date-sorted variant
+        (/user/NAME-date/0) from every site era, 2002-2013.
+
+        Returns [(original_url, [timestamps...]), ...], timestamps ascending.
+        """
+        rows = await self.cdx_search(
+            f"community.webshots.com/user/{username}",
+            match_type="prefix",
+            status_filter="200",
+        )
+        page_re = re.compile(
+            rf"^https?://community\.webshots\.com(?::80)?"
+            rf"/user/{re.escape(username)}(?:-date)?(?:/\d+)?/?$",
+            re.IGNORECASE,
+        )
+        pages: dict[str, list[str]] = {}
+        for row in rows:
+            ts, original = row[1], row[2]
+            if not page_re.match(original):
+                continue
+            canonical = original.replace(":80/", "/").rstrip("/")
+            pages.setdefault(canonical, []).append(ts)
+        return [(url, sorted(ts_list)) for url, ts_list in sorted(pages.items())]
 
     # ── URL derivation ──────────────────────────────────────────────
 

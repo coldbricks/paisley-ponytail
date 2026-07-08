@@ -63,7 +63,7 @@ async def recon(
     first_fmt = f"{first[:4]}-{first[4:6]}-{first[6:8]}"
     last_fmt = f"{last[:4]}-{last[4:6]}-{last[6:8]}"
 
-    success("RECON", f"{len(rows)} snapshots  ({first_fmt} .. {last_fmt})")
+    success("RECON", f"radar contact — {len(rows)} snapshots  ({first_fmt} .. {last_fmt})")
     phase("RECON", f"Latest capture: [bold]{timestamps[-1]}[/]")
 
     return timestamps[-1], rows
@@ -74,50 +74,81 @@ async def scan(
     ts: str,
     rows: list[list[str]],
     engine: Engine,
-) -> tuple[str, list[tuple[str, str, str]]] | None:
-    """SCAN phase: load profile page, extract album list.
+    deep: bool = False,
+) -> tuple[str, list[tuple[str, str, str, str]]] | None:
+    """SCAN phase: load profile page(s), extract album list.
 
-    Returns (effective_timestamp, albums_raw) or None.
-    albums_raw: [(original_url, category, album_id), ...]
+    Returns (effective_timestamp, albums) or None.
+    albums: [(original_url, category, album_id, wayback_ts), ...] —
+    each album carries the profile snapshot it was discovered at.
     """
     phase("SCAN", "Loading profile...")
     _, html = await engine.load_profile(username, ts)
 
-    albums_raw: list[tuple[str, str, str]] = []
+    albums: dict[str, tuple[str, str, str, str]] = {}  # album_id -> entry
     if html:
-        albums_raw = engine.extract_albums(html)
+        for url, category, album_id in engine.extract_albums(html):
+            albums.setdefault(album_id, (url, category, album_id, ts))
 
-    if not albums_raw:
+    if not albums:
         warn("SCAN", "No albums at latest timestamp, probing alternates...")
         timestamps = [r[1] for r in rows]
-        for alt_ts in reversed(timestamps[:-1]):
+        for alt_ts in list(reversed(timestamps[:-1]))[:8]:
             _, html = await engine.load_profile(username, alt_ts)
             if html:
-                albums_raw = engine.extract_albums(html)
-                if albums_raw:
+                found = engine.extract_albums(html)
+                if found:
                     ts = alt_ts
+                    for url, category, album_id in found:
+                        albums.setdefault(album_id, (url, category, album_id, ts))
                     success("SCAN", f"Found albums at {alt_ts}")
                     break
 
-    if not albums_raw:
+    if deep:
+        phase("DEEP", "Enumerating profile-page variants via CDX prefix search...")
+        pages = await engine.discover_profile_pages(username)
+        success("DEEP", f"{len(pages)} archived profile pages across all eras")
+        with make_progress(transient=True) as progress:
+            # Probe each page at its first and last capture — album sets
+            # changed across the site's decade, so eras matter.
+            probes = [
+                (url, snap_ts)
+                for url, ts_list in pages
+                for snap_ts in dict.fromkeys((ts_list[0], ts_list[-1]))
+            ]
+            task = progress.add_task("Deep scan", total=len(probes))
+            before = len(albums)
+            for url, snap_ts in probes:
+                page_html = await engine.load_page(url, snap_ts)
+                if page_html:
+                    for a_url, category, album_id in engine.extract_albums(page_html):
+                        albums.setdefault(album_id, (a_url, category, album_id, snap_ts))
+                progress.advance(task)
+        gained = len(albums) - before
+        if gained:
+            success("DEEP", f"[bold]+{gained}[/] albums not visible on the latest profile")
+        else:
+            phase("DEEP", "No additional albums beyond the latest profile")
+
+    if not albums:
         fail("SCAN", "No albums found at any timestamp")
         return None
 
-    success("SCAN", f"[bold]{len(albums_raw)}[/] albums identified")
-    return ts, albums_raw
+    success("SCAN", f"[bold]{len(albums)}[/] albums identified")
+    return ts, list(albums.values())
 
 
 # ── Commands ────────────────────────────────────────────────────────────
 
 
-async def cmd_search(username: str, engine: Engine) -> None:
+async def cmd_search(username: str, engine: Engine, deep: bool = False) -> None:
     """Search for a user: show profile info and album listing."""
     result = await recon(username, engine)
     if not result:
         return
     ts, rows = result
 
-    scan_result = await scan(username, ts, rows, engine)
+    scan_result = await scan(username, ts, rows, engine, deep=deep)
     if not scan_result:
         return
     ts, albums_raw = scan_result
@@ -129,8 +160,8 @@ async def cmd_search(username: str, engine: Engine) -> None:
 
     with make_progress(transient=True) as progress:
         task = progress.add_task("Scanning", total=len(albums_raw))
-        for url, category, album_id in albums_raw:
-            thumbs = await engine.load_album(url, ts)
+        for url, category, album_id, album_ts in albums_raw:
+            thumbs = await engine.load_album(url, album_ts)
             album_data.append((url, category, len(thumbs)))
             total_photos += len(thumbs)
             progress.advance(task)
@@ -140,11 +171,18 @@ async def cmd_search(username: str, engine: Engine) -> None:
     console.print()
     success("SCAN", f"[bold]{total_photos}[/] photos across {len(albums_raw)} albums")
     console.print()
-    detail(f"[dim]Run [bold]python3 resurrector.py pull {username}[/bold] to download all photos[/]")
+    detail(
+        f"[ok]CLEARED FOR PULL[/] [dim]▸[/] "
+        f"[bold]python resurrector.py pull {username}[/] "
+        f"[dim]to recover all photos[/]"
+    )
 
 
 async def cmd_pull(
-    username: str, engine: Engine, output_root: str = "output"
+    username: str,
+    engine: Engine,
+    output_root: str = "output",
+    deep: bool = False,
 ) -> None:
     """Download all photos for a user."""
     result = await recon(username, engine)
@@ -152,7 +190,7 @@ async def cmd_pull(
         return
     ts, rows = result
 
-    scan_result = await scan(username, ts, rows, engine)
+    scan_result = await scan(username, ts, rows, engine, deep=deep)
     if not scan_result:
         return
     ts, albums_raw = scan_result
@@ -165,8 +203,8 @@ async def cmd_pull(
 
     with make_progress(transient=True) as progress:
         task = progress.add_task("Scanning albums", total=len(albums_raw))
-        for url, category, album_id in albums_raw:
-            thumbs = await engine.load_album(url, ts)
+        for url, category, album_id, album_ts in albums_raw:
+            thumbs = await engine.load_album(url, album_ts)
             album_data.append((url, category, len(thumbs)))
             for t_ts, t_url in thumbs:
                 all_thumbs.append((t_ts, t_url, album_id, category))
@@ -231,7 +269,7 @@ async def cmd_pull(
     # ── Manifest ────────────────────────────────────────────────────
     manifest = {
         "tool": "webshots-resurrector",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "user": username,
         "wayback_timestamp": ts,
         "extracted_at": datetime.now(timezone.utc).isoformat(),
@@ -268,11 +306,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = parser.add_subparsers(dest="command")
 
+    deep_help = (
+        "enumerate every archived profile-page variant via CDX prefix "
+        "search — finds albums from older site eras (2002-2013)"
+    )
+
     p_search = sub.add_parser("search", help="Search for a user, list albums and photo counts")
     p_search.add_argument("username", help="Webshots username to look up")
+    p_search.add_argument("--deep", action="store_true", help=deep_help)
 
     p_pull = sub.add_parser("pull", help="Download all photos for a user")
     p_pull.add_argument("username", help="Webshots username to download")
+    p_pull.add_argument("--deep", action="store_true", help=deep_help)
     p_pull.add_argument(
         "-o", "--output", default="output", help="Output root directory (default: output/)"
     )
@@ -300,11 +345,12 @@ def main() -> None:
 
     async def _run():
         async with Engine(cfg) as engine:
+            deep = getattr(args, "deep", False)
             if args.command == "search":
-                await cmd_search(args.username, engine)
+                await cmd_search(args.username, engine, deep=deep)
             elif args.command == "pull":
                 out = getattr(args, "output", "output")
-                await cmd_pull(args.username, engine, out)
+                await cmd_pull(args.username, engine, out, deep=deep)
 
     try:
         asyncio.run(_run())
