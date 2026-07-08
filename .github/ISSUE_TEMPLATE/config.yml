@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: "LANDED — it worked, photos came home"
+    url: https://github.com/coldbricks/paisley-ponytail/discussions
+    about: "Tell the story — recovery stories are why this exists."
+  - name: "Removal requests (photos of you in the archive)"
+    url: https://github.com/coldbricks/paisley-ponytail/blob/main/PRIVACY.md
+    about: "The Internet Archive handles exclusions — PRIVACY.md has the route."

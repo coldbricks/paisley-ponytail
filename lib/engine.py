@@ -13,7 +13,9 @@ detail page.  Download chain per photo:
 from __future__ import annotations
 
 import asyncio
+import errno
 import os
+import random
 import re
 import time
 from html import unescape
@@ -32,6 +34,28 @@ UA = (
     "(webshots photo recovery; +https://github.com/coldbricks/paisley-ponytail)"
 )
 JPEG_MAGIC = b"\xff\xd8"
+
+
+class HangarFull(OSError):
+    """Disk full — stop burning archive.org requests we can't save."""
+
+
+def write_atomic(path: str, data: bytes) -> None:
+    """tmp + os.replace: a crash mid-write must never canonize a
+    truncated JPEG of someone's only copy of a photo."""
+    tmp = path + ".part"
+    try:
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, path)
+    except OSError as exc:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        if exc.errno in (errno.ENOSPC, getattr(errno, "EDQUOT", -1)):
+            raise HangarFull(*exc.args) from exc
+        raise
 
 # Statuses worth retrying: rate limits and archive.org brownouts.
 RETRY_STATUSES = {429, 500, 502, 503, 504}
@@ -186,6 +210,19 @@ class Engine:
           0          -> transport failure / retries exhausted (transient)
         """
         last_status = 0
+
+        def _backoff(attempt: int, retry_after: str | None = None) -> float:
+            wait = min(self.cfg.backoff_base ** (attempt + 1), self.cfg.backoff_cap)
+            if retry_after:
+                # archive.org told us exactly how long — believe it
+                try:
+                    wait = max(wait, float(retry_after))
+                except ValueError:
+                    pass  # HTTP-date form; the computed backoff stands
+            # ±30% jitter so a launch-day cohort of users desynchronizes
+            # instead of retrying archive.org in lockstep waves.
+            return min(wait * random.uniform(0.7, 1.3), self.cfg.backoff_cap * 1.3)
+
         for attempt in range(self.cfg.max_retries):
             await self._limiter.acquire()
             try:
@@ -196,10 +233,7 @@ class Engine:
                     return None, r.status_code
                 last_status = r.status_code
                 if r.status_code in RETRY_STATUSES:
-                    wait = min(
-                        self.cfg.backoff_base ** (attempt + 1),
-                        self.cfg.backoff_cap,
-                    )
+                    wait = _backoff(attempt, r.headers.get("Retry-After"))
                     if r.status_code in (429, 503):
                         # archive.org is telling everyone to slow down
                         self._limiter.cooldown(wait)
@@ -208,10 +242,7 @@ class Engine:
                 return None, r.status_code
             except httpx.HTTPError:
                 last_status = 0
-                wait = min(
-                    self.cfg.backoff_base ** (attempt + 1), self.cfg.backoff_cap
-                )
-                await asyncio.sleep(wait)
+                await asyncio.sleep(_backoff(attempt))
         return None, last_status
 
     async def _fetch_text(self, url: str) -> str | None:
@@ -763,8 +794,7 @@ class Engine:
                 )
                 if data:
                     path = fs_path if is_fs else ph_path
-                    with open(path, "wb") as f:
-                        f.write(data)
+                    write_atomic(path, data)
                     if is_fs and had_ph:
                         stats.upgraded += 1
                         record["upgraded"] = True
@@ -796,8 +826,7 @@ class Engine:
             data, _ = await self._try_image(thumb_ts, thumb_url, 300)
             if data:
                 th_path = os.path.join(output_dir, f"{pid}_th.jpg")
-                with open(th_path, "wb") as f:
-                    f.write(data)
+                write_atomic(th_path, data)
                 stats.thumbs_only += 1
                 stats.bytes += len(data)
                 record.update(variant="th", size=len(data),

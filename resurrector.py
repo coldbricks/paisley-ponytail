@@ -20,10 +20,11 @@ import json
 import os
 import re
 import sys
+import webbrowser
 from datetime import datetime, timezone
 
 from lib import __version__
-from lib.engine import Config, Engine, Stats
+from lib.engine import Config, Engine, HangarFull, Stats
 from lib.gallery import write_gallery
 from lib.remarks import load_remarks, remark_for, save_remark
 from lib.ui import (
@@ -186,6 +187,51 @@ async def scan(
 
     success("SCAN", f"[bold]{len(albums)}[/] albums identified")
     return ts, list(albums.values())
+
+
+def _merge_album_records(new: dict, old: dict) -> dict:
+    """Union two manifest records for the same album at PHOTO level.
+
+    An interrupted re-pull must never demote a previously saved photo
+    to a failed record — keep whichever record actually has a file.
+    """
+    photos: dict[str, dict] = {}
+    unkeyed: list[dict] = []
+    for p in list(old.get("photos", [])) + list(new.get("photos", [])):
+        pid = p.get("id")
+        if not pid:
+            unkeyed.append(p)
+            continue
+        prev = photos.get(pid)
+        if prev and prev.get("file") and not p.get("file"):
+            continue
+        photos[pid] = p
+    out = {**old, **new}
+    out["photos"] = list(photos.values()) + unkeyed
+    return out
+
+
+def _go_around_card(username: str) -> None:
+    """Zero recovery must end with a next step, never with silence."""
+    console.print()
+    fail("PULL", "GO-AROUND — nothing recovered this pass")
+    detail("[dim]Three things to try, in order:[/]")
+    detail(
+        f"[ok]1[/] [bold]python resurrector.py find {username[:4]}[/] "
+        f"[dim]— misspelled names are the #1 cause; sweep for the real one[/]"
+    )
+    detail(
+        f"[ok]2[/] [bold]python resurrector.py pull {username} --deep[/] "
+        f"[dim]— digs through every site era, 2002-2013[/]"
+    )
+    detail(
+        "[ok]3[/] [dim]If the albums were set private, they were never archived — "
+        "that's an honest dead end.[/]"
+    )
+    detail(
+        "[dim]Still stuck? File a report with the screen name:[/] "
+        "[bold]github.com/coldbricks/paisley-ponytail/issues/new[/]"
+    )
 
 
 def _album_dir_name(category: str, album_id: str, title: str | None) -> str:
@@ -438,6 +484,7 @@ async def cmd_pull(
     output_root: str = "output",
     deep: bool = False,
     only_albums: list[str] | None = None,
+    no_open: bool = False,
 ) -> None:
     """Download all photos for a user."""
     result = await recon(username, engine)
@@ -495,6 +542,16 @@ async def cmd_pull(
     output_dir = os.path.join(output_root, username)
     os.makedirs(output_dir, exist_ok=True)
 
+    # Windows still enforces ~260-char paths in most configurations;
+    # deep OneDrive-nested output roots render as 100% MISSED APCH.
+    if sys.platform == "win32":
+        worst_case = len(os.path.abspath(output_dir)) + 1 + 52 + 1 + 44
+        if worst_case > 247:
+            fail("PULL", "RUNWAY TOO SHORT — output path risks Windows' 260-char limit")
+            detail(f"[dim]Current hangar: {os.path.abspath(output_dir)}[/]")
+            detail("[dim]Rerun with a shorter output root, e.g. [bold]-o C:\\webshots[/][/]")
+            return
+
     stats = Stats()
     stats.pages_failed = pages_failed
     phase(
@@ -505,19 +562,37 @@ async def cmd_pull(
     console.print()
 
     interrupted = False
+    hangar_full = False
     with make_progress() as progress:
         task = progress.add_task(f"Pulling {username}", total=total)
 
         async def _dl(album: dict, thumb_ts: str, thumb_url: str, photo_page: str | None):
+            nonlocal hangar_full
             dir_name = _album_dir_name(album["category"], album["id"], album["title"])
             album_dir = os.path.join(output_dir, dir_name)
             os.makedirs(album_dir, exist_ok=True)
             album["dir"] = dir_name
 
+            if hangar_full:
+                # Disk is full: stop asking archive.org for bytes we
+                # cannot save.  These photos stay retryable.
+                stats.failed += 1
+                album["photos"].append({
+                    "id": engine.photo_id(thumb_url), "variant": "failed",
+                    "size": 0, "error": "disk full",
+                })
+                progress.advance(task)
+                return
+
             try:
                 record = await engine.download_photo(
                     thumb_ts, thumb_url, photo_page, album_dir, stats
                 )
+            except HangarFull:
+                hangar_full = True
+                stats.failed += 1
+                record = {"id": engine.photo_id(thumb_url), "variant": "failed",
+                          "size": 0, "error": "disk full"}
             except Exception as exc:  # one bad photo must never kill the run
                 stats.failed += 1
                 record = {"id": engine.photo_id(thumb_url), "variant": "failed",
@@ -556,18 +631,21 @@ async def cmd_pull(
             album["category"], album["id"], album["title"]))
 
     # Merge with a previous manifest so partial pulls (--album, deep
-    # reruns) never drop earlier albums from the gallery.
+    # reruns, interrupted runs) never drop earlier albums OR demote
+    # previously saved photos — union happens at photo level.
     manifest_path = os.path.join(output_dir, "manifest.json")
-    merged = {a["id"]: {k: v for k, v in a.items() if k != "ts"}
-              for a in album_infos}
+    merged: dict = {}
     if os.path.isfile(manifest_path):
         try:
             with open(manifest_path, encoding="utf-8") as f:
                 for prev in json.load(f).get("albums", []):
                     if prev.get("id"):
-                        merged.setdefault(prev["id"], prev)
+                        merged[prev["id"]] = prev
         except (OSError, ValueError):
             pass
+    for a in album_infos:
+        current = {k: v for k, v in a.items() if k != "ts"}
+        merged[a["id"]] = _merge_album_records(current, merged.get(a["id"], {}))
     all_albums = list(merged.values())
 
     manifest = {
@@ -582,19 +660,103 @@ async def cmd_pull(
         "totals": stats.as_dict(),
         "albums": all_albums,
     }
-    with open(manifest_path, "w", encoding="utf-8") as f:
+    tmp_manifest = manifest_path + ".part"
+    with open(tmp_manifest, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
+    os.replace(tmp_manifest, manifest_path)
 
     gallery_path = write_gallery(
         output_dir, username, all_albums, stats.as_dict()
     )
 
+    if hangar_full:
+        fail("PULL", "HANGAR FULL — the disk ran out of space mid-pull")
+        detail("[dim]Everything saved so far is safe. Free up space (or rerun with[/]")
+        detail("[dim]-o pointing at a bigger drive) and run the same command again.[/]")
     if interrupted:
         warn("PULL", "Interrupted — progress saved; rerun the same command to resume")
     show_summary(stats.as_dict(os.path.abspath(output_dir)))
     console.print()
     success("PULL", f"Contact sheet: [bold]{os.path.abspath(gallery_path)}[/]")
-    detail("[dim]Open it in a browser — that's your photos back.[/]")
+
+    # Flight recorder: what the user saw, for support reports.
+    try:
+        log_name = f"session_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%SZ')}.log"
+        console.save_text(os.path.join(output_dir, log_name), clear=False)
+    except OSError:
+        pass
+
+    recovered_any = (
+        stats.downloaded + stats.upgraded + stats.skipped + stats.thumbs_only
+    ) > 0
+    if not recovered_any and total:
+        _go_around_card(username)
+    elif recovered_any and not no_open and sys.stdin.isatty():
+        target = os.path.abspath(gallery_path)
+        try:
+            os.startfile(target)  # Windows
+        except AttributeError:
+            webbrowser.open("file:///" + target.replace(os.sep, "/"))
+        except OSError:
+            pass
+        detail("[dim]Opening the contact sheet in your browser — that's your photos back.[/]")
+    else:
+        detail("[dim]Open it in a browser — that's your photos back.[/]")
+
+
+async def wizard() -> None:
+    """The front door: no arguments, no manual, one question.
+
+    A double-click on Start_Here.bat lands here — the person on the
+    other end may never have used a terminal in their life.
+    """
+    detail("[dim]Guided mode. I'll walk you through it — Ctrl+C or Enter on an[/]")
+    detail("[dim]empty line closes this window whenever you're done.[/]")
+    cfg = Config()
+    async with Engine(cfg) as engine:
+        while True:
+            console.print()
+            try:
+                name = console.input(
+                    " [phase]SAY CALLSIGN[/] [dim]▸ what was the Webshots screen "
+                    "name? (Enter=close) ▸ [/]"
+                ).strip()
+            except (EOFError, KeyboardInterrupt):
+                return
+            if not name:
+                return
+            console.print()
+            if " " in name:
+                # Names never had spaces — this is a half-memory: sweep it.
+                await cmd_find(name, engine)
+                continue
+            result = await recon(name, engine)
+            if not result:
+                try:
+                    ans = console.input(
+                        " [ident]SWEEP?[/] [dim]▸ scan the archive for similar "
+                        "names? (Enter=yes · n=no) ▸ [/]"
+                    ).strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    return
+                if ans != "n":
+                    console.print()
+                    await cmd_find(name, engine)
+                continue
+            try:
+                ans = console.input(
+                    " [phase]INTENTIONS[/] [dim]▸ Enter=recover everything now · "
+                    "s=just look first · n=different name ▸ [/]"
+                ).strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                return
+            console.print()
+            if ans == "n":
+                continue
+            if ans == "s":
+                await cmd_search(name, engine)
+            else:
+                await cmd_pull(name, engine)
 
 
 # ── CLI ─────────────────────────────────────────────────────────────────
@@ -678,6 +840,10 @@ def build_parser() -> argparse.ArgumentParser:
         "-j", "--jobs", type=int, default=4, metavar="N",
         help="Concurrent downloads (default: 4, max 8)",
     )
+    p_pull.add_argument(
+        "--no-open", action="store_true",
+        help="don't auto-open gallery.html when the pull succeeds",
+    )
 
     return parser
 
@@ -689,7 +855,17 @@ def main() -> None:
     show_banner()
 
     if not args.command:
-        parser.print_help()
+        if sys.stdin.isatty():
+            try:
+                asyncio.run(wizard())
+            except KeyboardInterrupt:
+                pass
+            try:
+                input("\n Press Enter to close...")
+            except (EOFError, KeyboardInterrupt):
+                pass
+        else:
+            parser.print_help()
         return
 
     if args.command == "remarks":
@@ -714,6 +890,7 @@ def main() -> None:
                 await cmd_pull(
                     args.username, engine, out,
                     deep=deep, only_albums=getattr(args, "album", None),
+                    no_open=getattr(args, "no_open", False),
                 )
 
     try:

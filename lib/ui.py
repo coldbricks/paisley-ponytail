@@ -81,7 +81,9 @@ THEME = Theme(
     }
 )
 
-console = Console(theme=THEME, highlight=False)
+# record=True feeds the flight recorder — pulls save a session log so
+# support reports arrive with the full transcript attached.
+console = Console(theme=THEME, highlight=False, record=True)
 
 VERSION = __version__
 

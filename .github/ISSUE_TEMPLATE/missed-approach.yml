@@ -1,0 +1,44 @@
+name: "MISSED APCH — photos that should exist didn't come back"
+description: "A screen name that should work came back empty or incomplete"
+title: "MISSED APCH: "
+labels: ["missed-approach"]
+body:
+  - type: input
+    id: screen-name
+    attributes:
+      label: Webshots screen name
+      description: The exact name you searched (case doesn't matter)
+    validations:
+      required: true
+  - type: dropdown
+    id: what-happened
+    attributes:
+      label: What did the tool say?
+      options:
+        - "NO BEACONS CORRELATED (no captures found at all)"
+        - "Albums found, but 0 photos in them"
+        - "Some photos recovered, others MISSED APCH"
+        - "ATC ZERO / errors / crash"
+        - "Something else"
+    validations:
+      required: true
+  - type: input
+    id: era
+    attributes:
+      label: When was the account active?
+      placeholder: "e.g. 2003-2008, deleted around 2009"
+  - type: checkboxes
+    id: tried
+    attributes:
+      label: Already tried
+      options:
+        - label: "`find <first few letters>` to check the spelling"
+        - label: "`--deep` for accounts deleted before 2012"
+  - type: textarea
+    id: log
+    attributes:
+      label: Session log
+      description: >
+        Every pull writes a session_*.log file into output/<name>/ —
+        drag it into this box. If you only ran search, paste what the
+        terminal showed instead.

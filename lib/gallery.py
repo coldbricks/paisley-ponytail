@@ -114,6 +114,8 @@ def write_gallery(
     parts.append("</body></html>")
 
     path = os.path.join(output_dir, "gallery.html")
-    with open(path, "w", encoding="utf-8") as f:
+    tmp = path + ".part"
+    with open(tmp, "w", encoding="utf-8") as f:
         f.write("".join(parts))
+    os.replace(tmp, path)
     return path

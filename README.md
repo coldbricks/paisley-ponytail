@@ -17,9 +17,22 @@ you're looking for.
 
 The photos are still in there. This is the recovery aircraft.
 
+> Built on the work of **[Archive Team](https://wiki.archiveteam.org)** (who
+> saved the data in 2012) and the **[Internet Archive](https://archive.org)**
+> (who has kept it alive since). They are the only reason any of this exists.
+> If this tool brings your photos home, [donate to the
+> Archive](https://archive.org/donate) — they earned it years ago.
+
 ---
 
-## Preflight
+## Preflight — no terminal required
+
+**Windows, never used a terminal:** green **Code** button → **Download ZIP**
+→ extract it → double-click **`Start_Here.bat`**. It checks for Python
+(pointing you to the free installer if needed), sets itself up, and asks one
+question: *what was the screen name?* Answer it. That's the whole manual.
+
+**Comfortable in a terminal:**
 
 ```
 pip install -r requirements.txt
