@@ -34,10 +34,7 @@ original name and photo count. `pull` recovers everything and writes a
 **`gallery.html`** contact sheet: open it in a browser and you're looking at
 your albums again, original titles, original captions, twenty years later.
 
-<!-- screenshots: drop PNGs in assets/ and uncomment
 ![search — the flight-strip board](assets/screenshot_search.png)
-![pull + gallery.html contact sheet](assets/screenshot_gallery.png)
--->
 
 
 Interrupted mid-pull? Run the same command again. Finished photos hold at the
@@ -91,6 +88,8 @@ guesses, and finally the archived thumbnail itself — so you always land with
 *something*, and the manifest records exactly which rung each photo reached.
 
 ## Reading the instruments
+
+![pull — full-size originals landing, with the fallback ladder visible](assets/screenshot_pull.png)
 
 | Callout | Meaning |
 |---|---|
