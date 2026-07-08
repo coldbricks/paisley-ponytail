@@ -21,7 +21,7 @@
 | Field | Value |
 |---|---|
 | **Product name** | Paisley Ponytail (subtitle: the Webshots Resurrector) |
-| **Repo** | `C:\Users\coldb\webshots-resurrector` → github.com/coldbricks/webshots-resurrector (PUBLIC) |
+| **Repo** | `C:\Users\coldb\webshots-resurrector` → github.com/coldbricks/paisley-ponytail (PUBLIC; renamed from webshots-resurrector, old URL redirects) |
 | **Stack** | Python 3.10+ (developed on 3.14/Windows 11), httpx + rich; requirements.txt |
 | **Brand** | Tailstrike Studios × Ash Airfoil // coldbricks; WWII nose-art mascot (assets/nose_art.jpg); tower-cab terminal UI (Zulu clock, flight strips, LANDED/MISSED APCH callouts) |
 | **Distribution** | Shared on Reddit threads for people seeking lost accounts — first-run UX on Windows matters |

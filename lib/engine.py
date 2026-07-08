@@ -29,7 +29,7 @@ WAYBACK = "https://web.archive.org/web"
 CDX_API = "https://web.archive.org/cdx/search/cdx"
 UA = (
     f"PaisleyPonytail/{__version__} "
-    "(webshots photo recovery; +https://github.com/coldbricks/webshots-resurrector)"
+    "(webshots photo recovery; +https://github.com/coldbricks/paisley-ponytail)"
 )
 JPEG_MAGIC = b"\xff\xd8"
 

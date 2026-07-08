@@ -108,7 +108,7 @@ def write_gallery(
     parts.append(
         f"<footer>Recovered {when} · Paisley Ponytail v{__version__} "
         "(the Webshots Resurrector) · Tailstrike Studios × Ash Airfoil · "
-        "github.com/coldbricks/webshots-resurrector · "
+        "github.com/coldbricks/paisley-ponytail · "
         "Be kind to archive.org — they kept these photos alive.</footer>"
     )
     parts.append("</body></html>")
