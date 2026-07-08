@@ -144,6 +144,14 @@ Everything lands in `output/yourname/` — one folder per album, named by the
 album's original title, with `manifest.json` (per-photo records, variants,
 captions) and the `gallery.html` contact sheet alongside.
 
+And because someone will ask why the terminal feels *right*: the UI palette
+is **FAA HF-STD-010** — the standard color set certified for actual ATC
+displays, as evaluated on ERAM/STARS in DOT/FAA/AM-20/08. When `LANDED`
+prints in green, that is the exact green a controller sees. When you search,
+the tool squawks ident. When nothing matches, no beacons correlate to the
+flight plan. This is not a metaphor; we pulled the sRGB values out of the
+FAA's human-factors reports.
+
 ## Honest expectations
 
 - **Account public in fall 2012** — odds are genuinely good; often most photos

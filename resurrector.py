@@ -34,6 +34,7 @@ from lib.ui import (
     dl_thumb,
     dl_upgrade,
     fail,
+    ident_status,
     make_progress,
     phase,
     show_albums_table,
@@ -58,17 +59,25 @@ async def recon(
     phase("RECON", "Querying Wayback Machine CDX API...")
 
     url = f"community.webshots.com/user/{username}"
-    rows = await engine.cdx_search(url)
+    with ident_status(username):
+        rows = await engine.cdx_search(url)
 
     if rows is None:
-        fail("RECON", "archive.org is unreachable right now — this is a")
-        fail("RECON", "network problem, NOT proof the photos are gone.")
-        detail("[dim]Wait a few minutes and try again.[/]")
+        fail("RECON", "ATC ZERO — archive.org radar is down")
+        detail("[dim]This is an outage, NOT an empty sky. The photos aren't gone;[/]")
+        detail("[dim]the radar is. Give it a few minutes and call again.[/]")
         return None
     if not rows:
-        fail("RECON", f"No Wayback captures found for [target]{username}[/]")
-        detail("[dim]Double-check the screen name spelling; Webshots names[/]")
-        detail("[dim]were case-insensitive but typos are forever.[/]")
+        fail(
+            "RECON",
+            f"NO BEACONS CORRELATED — no flight plan on file for CID [target]{username}[/]",
+        )
+        detail("[dim]ERAM shows no flight plan. STARS shows no primary target.[/]")
+        detail("[dim]Check the spelling — or sweep the frequency for it:[/]")
+        detail(
+            f"[ok]▸[/] [bold]python resurrector.py find {username[:6]}[/] "
+            f"[dim]lists every archived callsign matching a prefix[/]"
+        )
         return None
 
     timestamps = [r[1] for r in rows]
@@ -76,7 +85,11 @@ async def recon(
     first_fmt = f"{first[:4]}-{first[4:6]}-{first[6:8]}"
     last_fmt = f"{last[:4]}-{last[4:6]}-{last[6:8]}"
 
-    success("RECON", f"radar contact — {len(rows)} snapshots  ({first_fmt} .. {last_fmt})")
+    success(
+        "RECON",
+        f"IDENT received — radar contact, [bold]{len(rows)}[/] beacons correlated"
+        f"  ({first_fmt} .. {last_fmt})",
+    )
     phase("RECON", f"Latest capture: [bold]{timestamps[-1]}[/]")
 
     return timestamps[-1], rows
@@ -161,7 +174,9 @@ async def scan(
             phase("DEEP", "No additional albums beyond the latest profile")
 
     if not albums:
-        fail("SCAN", "No albums found at any timestamp")
+        fail("SCAN", "PRIMARY TARGET ONLY — beacon correlated, but no albums read off the strip")
+        detail("[dim]The profile was archived; its album data wasn't. If you didn't[/]")
+        detail("[dim]use --deep, try it — other eras of radar coverage sometimes hold the strips.[/]")
         return None
 
     success("SCAN", f"[bold]{len(albums)}[/] albums identified")
@@ -200,9 +215,10 @@ async def cmd_find(
     truncated = False
     for v in variants:
         phase("SWEEP", f"Scanning frequency for callsigns matching [target]{v}*[/]")
-        result = await engine.find_usernames(v)
+        with ident_status(f"{v}*"):
+            result = await engine.find_usernames(v)
         if result is None:
-            fail("SWEEP", "archive.org is unreachable right now — try again shortly")
+            fail("SWEEP", "ATC ZERO — archive.org radar is down; try again shortly")
             return
         found, was_truncated = result
         truncated = truncated or was_truncated
@@ -217,8 +233,11 @@ async def cmd_find(
                 prev["last"] = max(prev["last"], r["last"])
 
     if not merged:
-        fail("SWEEP", f"No archived screen names start with [target]{query}[/]")
-        detail("[dim]Try a shorter prefix — even just the first few letters.[/]")
+        fail(
+            "SWEEP",
+            f"SWEEP COMPLETE — no beacons correlated to that flight plan ([target]{query}[/])",
+        )
+        detail("[dim]The frequency is quiet. Try fewer letters — even just the first three.[/]")
         return
 
     ranked = sorted(merged.values(), key=lambda r: (-r["pages"], r["name"].lower()))
@@ -227,7 +246,7 @@ async def cmd_find(
     console.print()
     show_callsigns_table(shown, len(ranked))
     console.print()
-    success("SWEEP", f"[bold]{len(ranked)}[/] callsigns on frequency")
+    success("SWEEP", f"[bold]{len(ranked)}[/] beacons correlated on frequency")
     if truncated:
         warn("SWEEP", "Index scan hit its cap — matches beyond it aren't listed; narrow the prefix")
 

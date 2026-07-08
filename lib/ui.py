@@ -31,20 +31,39 @@ from rich.theme import Theme
 
 from lib import __version__
 
+# FAA HF-STD-010 standard color palette for ATC displays, as evaluated on
+# ERAM/STARS in DOT/FAA/AM-20/08 (Table 2, sRGB).  This terminal is,
+# colorimetrically, a certified radar scope.
+HF = {
+    "white": "#FFFFFF",
+    "pink": "#F684D8",
+    "gray": "#B3B3B3",
+    "blue": "#5E8DF6",
+    "orange": "#FE930D",
+    "red": "#FF1320",
+    "green": "#23E162",
+    "yellow": "#DFF334",
+    "magenta": "#D822FF",
+    "aqua": "#07CDED",
+    "brown": "#C5955B",
+}
+
 THEME = Theme(
     {
-        "phase": "bold bright_green",
-        "ok": "bold green",
-        "warn": "bold yellow",
-        "err": "bold red",
+        "phase": f"bold {HF['green']}",
+        "ok": f"bold {HF['green']}",
+        "warn": f"bold {HF['yellow']}",
+        "err": f"bold {HF['red']}",
         "dim": "dim",
-        "target": "bold white",
-        "heading": "bold white",
-        "scope": "green",
-        "amber": "yellow",
-        "zulu": "dim green",
-        "strip": "bold black on green",
-        "brand": "bold white",
+        "target": f"bold {HF['white']}",
+        "heading": f"bold {HF['white']}",
+        "scope": HF["green"],
+        "amber": HF["orange"],
+        "zulu": f"dim {HF['green']}",
+        "strip": f"bold black on {HF['green']}",
+        "brand": f"bold {HF['white']}",
+        "deep": f"bold {HF['magenta']}",
+        "ident": f"bold {HF['aqua']}",
     }
 )
 
@@ -61,18 +80,18 @@ def _zulu() -> str:
 # ── Banner ──────────────────────────────────────────────────────────────
 
 LOGO_PAISLEY = (
-    "  [bold green]█▀█ █▀█ █ █▀▀ █   █▀▀ █ █[/]\n"
-    "  [bold green]█▀▀ █▀█ █ ▀▀█ █   █▀▀ ▀█▀[/]\n"
-    "  [bold green]▀   ▀ ▀ ▀ ▀▀▀ ▀▀▀ ▀▀▀  ▀ [/]"
+    "  [phase]█▀█ █▀█ █ █▀▀ █   █▀▀ █ █[/]\n"
+    "  [phase]█▀▀ █▀█ █ ▀▀█ █   █▀▀ ▀█▀[/]\n"
+    "  [phase]▀   ▀ ▀ ▀ ▀▀▀ ▀▀▀ ▀▀▀  ▀ [/]"
 )
 
 LOGO_PONYTAIL = (
-    "  [bold white]█▀█ █▀█ █▀█ █ █ ▀█▀ █▀█ █ █  [/]\n"
-    "  [bold white]█▀▀ █ █ █ █ ▀█▀  █  █▀█ █ █  [/]\n"
-    "  [bold white]▀   ▀▀▀ ▀ ▀  ▀   ▀  ▀ ▀ ▀ ▀▀▀[/]"
+    "  [brand]█▀█ █▀█ █▀█ █ █ ▀█▀ █▀█ █ █  [/]\n"
+    "  [brand]█▀▀ █ █ █ █ ▀█▀  █  █▀█ █ █  [/]\n"
+    "  [brand]▀   ▀▀▀ ▀ ▀  ▀   ▀  ▀ ▀ ▀ ▀▀▀[/]"
 )
 
-SCANLINE = "[dim green]" + "▔" * 60 + "[/]"
+SCANLINE = "[zulu]" + "▔" * 60 + "[/]"
 
 
 def show_banner():
@@ -91,7 +110,7 @@ def show_banner():
     )
     console.print()
     console.print(
-        Panel(body, border_style="green", box=box.DOUBLE, padding=(1, 1))
+        Panel(body, border_style=HF["green"], box=box.DOUBLE, padding=(1, 1))
     )
     console.print()
 
@@ -107,7 +126,9 @@ def _xmit(style: str, tag: str, msg: str):
 
 
 def phase(tag, msg):
-    _xmit("phase", tag, msg)
+    # DEEP wears TRACON magenta (special condition); SWEEP wears beacon aqua.
+    style = {"DEEP": "deep", "SWEEP": "ident"}.get(tag, "phase")
+    _xmit(style, tag, msg)
 
 
 def success(tag, msg):
@@ -124,6 +145,20 @@ def fail(tag, msg):
 
 def detail(msg):
     console.print(f"                    {msg}")
+
+
+def ident_status(target):
+    """Blinking SQUAWK IDENT while we interrogate the archive's radar.
+
+    Terminals without blink support render it steady — still correct,
+    just less fun.
+    """
+    return console.status(
+        f"[blink ident]■ SQUAWK IDENT ■[/] "
+        f"[dim]interrogating[/] [target]{target}[/] [dim]— awaiting reply[/]",
+        spinner="line",
+        spinner_style=HF["aqua"],
+    )
 
 
 # ── Download callouts ───────────────────────────────────────────────────
@@ -182,15 +217,15 @@ def show_albums_table(albums):
         show_header=True,
         header_style="strip",
         padding=(0, 1),
-        border_style="dim green",
+        border_style=f"dim {HF['green']}",
         box=box.HEAVY_HEAD,
-        title="[bold green]▮▮ FLIGHT STRIPS — ALBUMS ON SCOPE ▮▮[/]",
+        title="[phase]▮▮ FLIGHT STRIPS — ALBUMS ON SCOPE ▮▮[/]",
         title_justify="left",
     )
     table.add_column("STRIP", style="dim", width=5, justify="right")
     table.add_column("ALBUM", style="bold white", max_width=30)
     table.add_column("SQUAWK · ID", style="scope", max_width=20)
-    table.add_column("SECTOR", style="bold green", max_width=14)
+    table.add_column("SECTOR", style="phase", max_width=14)
     table.add_column("PHOTOS", style="bold white", justify="right", width=7)
 
     for i, (url, category, count, title) in enumerate(albums, 1):
@@ -215,9 +250,9 @@ def show_callsigns_table(rows, total_found):
         show_header=True,
         header_style="strip",
         padding=(0, 1),
-        border_style="dim green",
+        border_style=f"dim {HF['green']}",
         box=box.HEAVY_HEAD,
-        title="[bold green]▮▮ CALLSIGNS ON FREQUENCY ▮▮[/]",
+        title="[ident]▮▮ CALLSIGNS ON FREQUENCY ▮▮[/]",
         title_justify="left",
     )
     table.add_column("STRIP", style="dim", width=5, justify="right")
@@ -255,7 +290,7 @@ def show_summary(stats):
     total_found = ok + bad + skip + stats.get("thumbs_only", 0)
 
     table = Table(show_header=False, padding=(0, 2), box=None)
-    table.add_column("K", style="dim green", width=22)
+    table.add_column("K", style=f"dim {HF['green']}", width=22)
     table.add_column("V", style="bold white")
 
     table.add_row("TRAFFIC (photos found)", str(total_found))
@@ -277,9 +312,9 @@ def show_summary(stats):
     table.add_row("HANGAR (output dir)", stats["output_dir"])
 
     if bad == 0:
-        border, title = "green", "[bold green]■ OPERATIONS NORMAL — RUNWAY CLEAR ■[/]"
+        border, title = HF["green"], "[phase]■ OPERATIONS NORMAL — RUNWAY CLEAR ■[/]"
     else:
-        border, title = "yellow", "[bold yellow]■ OPERATION COMPLETE — WITH MISSES ■[/]"
+        border, title = HF["yellow"], "[warn]■ OPERATION COMPLETE — WITH MISSES ■[/]"
     console.print()
     console.print(
         Panel(table, title=title, border_style=border, box=box.DOUBLE, padding=(1, 2))
@@ -292,8 +327,8 @@ def show_summary(stats):
 def make_progress(transient=False):
     return Progress(
         SpinnerColumn(spinner_name="dots"),
-        TextColumn("[bold green]{task.description}"),
-        BarColumn(bar_width=30, complete_style="green", finished_style="bold green"),
+        TextColumn("[phase]{task.description}"),
+        BarColumn(bar_width=30, complete_style=HF["green"], finished_style=f"bold {HF['green']}"),
         TextColumn("[bold]{task.completed}[/]/{task.total}"),
         TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
         TimeElapsedColumn(),
