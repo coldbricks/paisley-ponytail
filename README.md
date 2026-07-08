@@ -1,70 +1,133 @@
-# Paisley Ponytail — the Webshots Resurrector
+# Paisley Ponytail
 
 ![Paisley Ponytail nose art](assets/nose_art.jpg)
 
-**Bring lost photos back to life.**
+**The Webshots Resurrector — bring lost photos back to life.**
 
-Webshots was a photo sharing service with 14 million users at its peak. In December 2012, the final owner deleted everything. Archive Team ran an emergency crawl and saved what they could — 105.9 TB of photos locked inside 2,437 megawarc blobs on the Internet Archive.
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3c7a3c)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-3c7a3c)](LICENSE)
+![Megawarcs on frequency](https://img.shields.io/badge/on%20frequency-2%2C437%20megawarcs%20%2F%20105.9%20TB-1f3d1f)
 
-The search tools died years ago. `warctozip.archive.org` has no DNS. The freeze-frame index links go nowhere, and the raw megawarcs are access-restricted now. But everything Archive Team saved was ingested into the **Wayback Machine** — and this tool is the key back in.
+Webshots hosted 14 million users' photos from 1995 until December 2012, when its final owner deleted everything. Archive Team scrambled an emergency crawl in the last weeks and hauled 105.9 TB into the Internet Archive — then the extraction tooling died in 2016 and the wreckage sat locked in 2,437 fifty-gigabyte WARC blobs for a decade.
+
+The photos are still in there. This is the recovery aircraft.
 
 ---
 
-## Quick start
+## Preflight
 
 ```
 pip install -r requirements.txt
+```
 
-python resurrector.py search yourscreenname     # what's recoverable?
+Python 3.10+. Windows, macOS, Linux. No accounts, no API keys, no sign-ups.
+
+## Cleared for departure
+
+```
+python resurrector.py search yourscreenname     # what's on the scope?
 python resurrector.py pull   yourscreenname     # bring it home
 ```
 
-Works on Windows, macOS, and Linux. Python 3.10+.
+`search` gives you the flight-strip board — every archived album, with its
+original name and photo count. `pull` recovers everything and writes a
+**`gallery.html`** contact sheet: open it in a browser and you're looking at
+your albums again, original titles, original captions, twenty years later.
 
-When the pull finishes you get a **`gallery.html` contact sheet** — open it in a browser and you're looking at your photos again, organized by album, with the original album names.
+<!-- screenshots: drop PNGs in assets/ and uncomment
+![search — the flight-strip board](assets/screenshot_search.png)
+![pull + gallery.html contact sheet](assets/screenshot_gallery.png)
+-->
 
-## What It Does
 
-Given a Webshots username, Paisley Ponytail:
+Interrupted mid-pull? Run the same command again. Finished photos hold at the
+gate; photos that only landed at 800×600 get an automatic upgrade attempt to
+full-size on every pass until the archive definitively says it isn't there.
 
-1. **Queries the Wayback Machine CDX API** for archived snapshots of the profile
-2. **Walks every album** — including the pagination pages past page 1 that manual Wayback browsing makes easy to miss
-3. **Resolves each photo's real image URL from its archived photo detail page** (the image servers can't be guessed from thumbnails — the photo page is the source of truth)
-4. **Downloads the best surviving copy**: full-size original (`_fs`, camera resolution) → 800×600 (`_ph`) → archived thumbnail as a last resort, so you always get *something*
-5. **Writes it all down**: per-photo manifest with album titles and captions, plus the gallery contact sheet
-
-Interrupted? Run the same command again — finished photos are skipped, and photos that only got the 800×600 copy are automatically upgraded to full-size when it can be found.
-
-## Going deeper
-
-```
-python resurrector.py search yourscreenname --deep
-```
-
-`--deep` enumerates every archived version of your profile from **2002 through 2013** via CDX prefix search. If you deleted albums years before Webshots died, older snapshots often still remember them. (Older-era captures are more likely to yield lower resolutions.)
+### Extended operations
 
 ```
-python resurrector.py pull yourscreenname --album ALBUMID
+python resurrector.py search yourscreenname --deep      # dig back to 2002
+python resurrector.py pull   yourscreenname --album ID  # one album only
+python resurrector.py pull   yourscreenname -j 6        # more concurrency (max 8)
 ```
 
-Pull a single album (repeat `--album` for several). Album IDs are shown by `search`.
+`--deep` runs a CDX prefix sweep over every archived variant of your profile —
+pagination pages, the date-sorted view, every site redesign from 2002 to 2013 —
+and resurrects albums you deleted years before the site died.
+
+## How it actually works
+
+The Wayback Machine is the only door: the raw freeze-frame megawarcs went
+access-restricted (HTTP 401) years ago and the old username index is dark. But
+everything Archive Team captured was ingested into Wayback, so recovery is a
+CDX-navigation problem:
+
+```
+screen name
+  └─▸ CDX API: every capture of community.webshots.com/user/NAME (2002–2013)
+       └─▸ profile pages → album links (+ pagination: ?start=N and /album/ID/N)
+            └─▸ album grids → (thumbnail, photo-page) pairs + album titles
+                 └─▸ photo detail page → the photo's REAL image URL + caption
+                      └─▸ _fs.jpg original → _ph.jpg 800×600 → thumbnail
+```
+
+Two hard-won facts drive the design, both established by adversarial testing
+against live archive data:
+
+- **You cannot guess a photo's image server.** A thumbnail on `thumb13` maps
+  to full-size copies on `image04`, `image12`, `image20` — unrelated numbers.
+  The only trustworthy source is the archived photo detail page, so the tool
+  resolves every photo through its page. (Naive URL derivation — what every
+  dead Webshots scraper attempted — silently misses almost everything.)
+- **The 2002–2005 era is a different aircraft.** Old thumbnails ride
+  `thumbN.webshots.com` with per-image load-balancer host digits, old albums
+  paginate by path segment, and old full-size images live at
+  `community.webshots.com/sym/imageN/…` — which *is* derivable, from the
+  thumbnail's path digit. Paisley Ponytail speaks both eras.
+
+Every photo descends a fallback ladder — real full-size, real 800×600, derived
+guesses, and finally the archived thumbnail itself — so you always land with
+*something*, and the manifest records exactly which rung each photo reached.
+
+## Reading the instruments
+
+| Callout | Meaning |
+|---|---|
+| `LANDED  FS` | Full-size original recovered — actual camera resolution |
+| `LANDED  PH` | 800×600 copy recovered (full-size not archived) |
+| `UPGRADED FS` | A previous 800×600 was replaced by the located original |
+| `THUMB ONLY` | Only the 100×75 thumbnail survived the crawl |
+| `AT GATE` | Already on disk from an earlier run |
+| `MISSED APCH` | Genuinely not in the archive — nothing to recover |
+
+Everything lands in `output/yourname/` — one folder per album, named by the
+album's original title, with `manifest.json` (per-photo records, variants,
+captions) and the `gallery.html` contact sheet alongside.
 
 ## Honest expectations
 
-- **Account public in fall 2012** → odds are genuinely good; often most photos at full resolution
-- **Account deleted before 2012** → sometimes! Try `--deep`; quality may be lower
-- **Albums set to private** → they were never archived; nothing can recover them
+- **Account public in fall 2012** — odds are genuinely good; often most photos
+  at full resolution. The Archive Team crawl was systematic.
+- **Account deleted before 2012** — sometimes. Regular Wayback crawls ran from
+  2002 on; `--deep` finds those albums, but early-era image coverage is patchy.
+  Expect partial albums and thumbnails.
+- **Albums set to private** — never archived. No tool can recover them.
 
-## Etiquette
+## Etiquette (read before filing complaints about speed)
 
-All requests are rate-limited (~1/sec sustained) with global backoff on 429/503. archive.org is the only reason any of this still exists — the tool treats their servers accordingly, and you should too.
+archive.org is the only reason any of this still exists. All traffic funnels
+through one global rate limiter (~1 request/second sustained), a 429/503 from
+the tower slows *every* coroutine, retries back off exponentially, and deep
+sweeps are probe-capped. The pace is a feature. Fly the published procedure.
 
-## Why This Exists
+## Why this exists
 
-Between 1995 and 2012, millions of people uploaded their only copies of family photos, travel pictures, and memories to Webshots. When Threefold Photos pulled the plug, most of those photos vanished. Archive Team's crawl saved a fraction, but the tools to search and extract them have been dead since ~2016. If someone's grandmother's photos are in there, this is how you get them back.
+Between 1995 and 2012, millions of people uploaded the only copies of their
+family photos to Webshots. The author spent years recovering his own, one
+Wayback page at a time. Nobody should have to do that twice.
 
-Built by [Tailstrike Studios × Ash Airfoil](https://github.com/coldbricks) — coldbricks.
+---
 
-## License
-
-MIT
+**Tailstrike Studios × Ash Airfoil** // coldbricks · MIT license ·
+Not affiliated with the Internet Archive — just grateful guests on their frequency.
