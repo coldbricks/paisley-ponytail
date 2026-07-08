@@ -27,9 +27,19 @@ from rich.progress import (
     TimeElapsedColumn,
     TimeRemainingColumn,
 )
+from rich.spinner import SPINNERS
 from rich.theme import Theme
 
 from lib import __version__
+
+# Distant-traffic anti-collision strobe: quick double-pulse, then dark.
+# Runs as the spinner wherever the tool is working — like watching a
+# far-off aircraft hold over the water at night.
+SPINNERS["strobe"] = {
+    "interval": 100,
+    "frames": ["✸", "✦", "·", " ", "✸", "✦", "·", " ",
+               " ", " ", " ", " ", " ", " ", " ", " "],
+}
 
 # FAA HF-STD-010 standard color palette for ATC displays, as evaluated on
 # ERAM/STARS in DOT/FAA/AM-20/08 (Table 2, sRGB).  This terminal is,
@@ -64,6 +74,9 @@ THEME = Theme(
         "brand": f"bold {HF['white']}",
         "deep": f"bold {HF['magenta']}",
         "ident": f"bold {HF['aqua']}",
+        # Sectional-chart backdrop: barely-there green, under the black.
+        "chart": "#20362a",
+        "chartlabel": "#2e4b36",
     }
 )
 
@@ -93,6 +106,21 @@ LOGO_PONYTAIL = (
 
 SCANLINE = "[zulu]" + "▔" * 60 + "[/]"
 
+# Video map, N90 style: Long Island's south shore with the W-105/106
+# warning areas off the coast, drawn the way STARS draws the world —
+# faint lines under the black that you stop seeing until you need them.
+# Fixes are real: DPK, ISP, CCC, HTO up the island; CAMRN, SHIPP, MONEY
+# over the water; Y483 running oceanic.  ✦ is distant traffic.
+VIDEOMAP = (
+    "  [chart] ∙LGA                  LONG ISLAND[/]\n"
+    "  [chart]∙JFK˙·¸¸.·‾‾·¸¸ ∙DPK ¸¸.·‾‾‾·¸¸ ∙ISP ¸.·‾‾·¸ ∙HTO ¸¸.·˙MONTK[/]\n"
+    "  [chart]   ∙CAMRN          ∙SHIPP            ∙MONEY            ˙✦[/]\n"
+    "  [chart]   ╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍  Y483 ⟶[/]\n"
+    "  [chart]   ╏    [/][chartlabel]W-105A[/][chart]     ╏     [/]"
+    "[chartlabel]W-105B[/][chart]     ╏    [/][chartlabel]W-106[/][chart]   ╏[/]\n"
+    "  [chart]   ╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍[/]"
+)
+
 
 def show_banner():
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%MZ")
@@ -106,7 +134,8 @@ def show_banner():
         f" WAYBACK RADAR ONLINE[/]\n"
         f"  {SCANLINE}\n"
         f"  [brand]TAILSTRIKE STUDIOS[/] [dim]×[/] [brand]ASH AIRFOIL[/]"
-        f" [dim]// coldbricks // {now}[/]"
+        f" [dim]// coldbricks // {now}[/]\n\n"
+        f"{VIDEOMAP}"
     )
     console.print()
     console.print(
@@ -156,8 +185,8 @@ def ident_status(target):
     return console.status(
         f"[blink ident]■ SQUAWK IDENT ■[/] "
         f"[dim]interrogating[/] [target]{target}[/] [dim]— awaiting reply[/]",
-        spinner="line",
-        spinner_style=HF["aqua"],
+        spinner="strobe",
+        spinner_style=HF["white"],
     )
 
 
@@ -326,7 +355,7 @@ def show_summary(stats):
 
 def make_progress(transient=False):
     return Progress(
-        SpinnerColumn(spinner_name="dots"),
+        SpinnerColumn(spinner_name="strobe", style=HF["white"]),
         TextColumn("[phase]{task.description}"),
         BarColumn(bar_width=30, complete_style=HF["green"], finished_style=f"bold {HF['green']}"),
         TextColumn("[bold]{task.completed}[/]/{task.total}"),

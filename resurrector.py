@@ -258,27 +258,35 @@ async def cmd_find(
     while True:
         console.print()
         try:
-            answer = console.input(
+            raw = console.input(
                 " [phase]SAY INTENTIONS[/] [dim]▸[/] "
                 "[bold]#[/][dim]=search strip · [/]"
                 "[bold]p#[/][dim]=pull strip · [/]"
+                "[bold]name[/][dim]=new sweep · [/]"
                 "[dim]Enter=stand by ▸ [/]"
-            ).strip().lower()
+            ).strip()
         except (EOFError, KeyboardInterrupt):
             break
-        if not answer:
+        if not raw:
             break
-        pull_it = answer.startswith("p")
-        num = answer.lstrip("p").strip()
-        if not num.isdigit() or not (1 <= int(num) <= len(shown)):
-            warn("SWEEP", f"Say again — that's not a strip number on the board (1-{len(shown)})")
-            continue
-        name = shown[int(num) - 1]["name"]
-        console.print()
-        if pull_it:
-            await cmd_pull(name, engine, output_root)
+        m = re.fullmatch(r"[pP]?\s*(\d+)", raw)
+        if m:
+            n = int(m.group(1))
+            if not (1 <= n <= len(shown)):
+                warn("SWEEP", f"Say again — that's not a strip number on the board (1-{len(shown)})")
+                continue
+            name = shown[n - 1]["name"]
+            console.print()
+            if raw.lower().startswith("p"):
+                await cmd_pull(name, engine, output_root)
+                break
+            await cmd_search(name, engine)
+        else:
+            # Anything that isn't a strip number is a new callsign —
+            # controllers don't leave the scope to change targets.
+            console.print()
+            await cmd_find(raw, engine, top=top, output_root=output_root)
             break
-        await cmd_search(name, engine)
 
 
 # ── Commands ────────────────────────────────────────────────────────────

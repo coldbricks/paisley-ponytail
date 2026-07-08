@@ -476,8 +476,11 @@ class Engine:
             m = RE_USER_PAGE.match(original)
             if not m:
                 continue
-            # /user/NAME-date is the site's date-sorted view, not a user
+            # /user/NAME-date is the site's date-sorted view, not a user.
+            # Strip URL-decoding artifacts (stray spaces, trailing dots)
+            # or the same account shows up as two strips.
             cased = re.sub(r"-date$", "", unquote(m.group(1)), flags=re.IGNORECASE)
+            cased = " ".join(cased.split()).strip(" .,")
             if not cased:
                 continue
             u = users.setdefault(
