@@ -1,6 +1,8 @@
-# Webshots Resurrector
+# Paisley Ponytail — the Webshots Resurrector
 
 **Bring lost photos back to life.**
+
+*Why "Paisley Ponytail"? It sounds like a pony you would 100% not mess with. That's the energy this tool brings to your lost photos.*
 
 Webshots was a photo sharing service with 14 million users at its peak. In December 2012, the final owner deleted everything. Archive Team ran an emergency crawl and saved what they could — 105.9 TB of photos locked inside 2,437 megawarc blobs on the Internet Archive.
 

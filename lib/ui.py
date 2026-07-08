@@ -58,16 +58,16 @@ def _zulu() -> str:
 
 # ── Banner ──────────────────────────────────────────────────────────────
 
-LOGO_WEBSHOTS = (
-    "  [bold green]█ █ █▀▀ █▀▄ █▀▀ █ █ █▀█ ▀█▀ █▀▀[/]\n"
-    "  [bold green]█▄█ █▀▀ █▀▄ ▀▀█ █▀█ █ █  █  ▀▀█[/]\n"
-    "  [bold green]▀ ▀ ▀▀▀ ▀▀  ▀▀▀ ▀ ▀ ▀▀▀  ▀  ▀▀▀[/]"
+LOGO_PAISLEY = (
+    "  [bold green]█▀█ █▀█ █ █▀▀ █   █▀▀ █ █[/]\n"
+    "  [bold green]█▀▀ █▀█ █ ▀▀█ █   █▀▀ ▀█▀[/]\n"
+    "  [bold green]▀   ▀ ▀ ▀ ▀▀▀ ▀▀▀ ▀▀▀  ▀ [/]"
 )
 
-LOGO_RESURRECTOR = (
-    "  [bold white]█▀█ █▀▀ █▀▀ █ █ █▀█ █▀█ █▀▀ █▀▀ ▀█▀ █▀█ █▀█[/]\n"
-    "  [bold white]█▀▄ █▀▀ ▀▀█ █ █ █▀▄ █▀▄ █▀▀ █    █  █ █ █▀▄[/]\n"
-    "  [bold white]▀ ▀ ▀▀▀ ▀▀▀ ▀▀▀ ▀ ▀ ▀ ▀ ▀▀▀ ▀▀▀  ▀  ▀▀▀ ▀ ▀[/]"
+LOGO_PONYTAIL = (
+    "  [bold white]█▀█ █▀█ █▀█ █ █ ▀█▀ █▀█ █ █  [/]\n"
+    "  [bold white]█▀▀ █ █ █ █ ▀█▀  █  █▀█ █ █  [/]\n"
+    "  [bold white]▀   ▀▀▀ ▀ ▀  ▀   ▀  ▀ ▀ ▀ ▀▀▀[/]"
 )
 
 SCANLINE = "[dim green]" + "▔" * 60 + "[/]"
@@ -76,10 +76,10 @@ SCANLINE = "[dim green]" + "▔" * 60 + "[/]"
 def show_banner():
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%MZ")
     body = (
-        f"{LOGO_WEBSHOTS}\n"
-        f"{LOGO_RESURRECTOR}\n\n"
+        f"{LOGO_PAISLEY}\n"
+        f"{LOGO_PONYTAIL}\n\n"
         f"  {SCANLINE}\n"
-        f"  [scope]INTERNET ARCHIVE PHOTO RECOVERY SYSTEM[/]"
+        f"  [scope]THE WEBSHOTS RESURRECTOR ▪ ARCHIVE PHOTO RECOVERY[/]"
         f"  [dim]│[/]  [scope]v{VERSION}[/]\n"
         f"  [dim]2,437 MEGAWARCS ON FREQUENCY ▪ 105.9 TB ▪"
         f" WAYBACK RADAR ONLINE[/]\n"

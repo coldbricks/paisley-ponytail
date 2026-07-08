@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Webshots Resurrector  --  Internet Archive Photo Recovery System
+Paisley Ponytail  --  the Webshots Resurrector
+Internet Archive Photo Recovery System
 
 Search for Webshots users and download their archived photos from
 the Wayback Machine.  Full-size originals when available, 800x600
@@ -269,6 +270,7 @@ async def cmd_pull(
     # ── Manifest ────────────────────────────────────────────────────
     manifest = {
         "tool": "webshots-resurrector",
+        "codename": "Paisley Ponytail",
         "version": "1.1.0",
         "user": username,
         "wayback_timestamp": ts,
@@ -294,7 +296,7 @@ async def cmd_pull(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="resurrector",
-        description="Webshots Resurrector  -  Internet Archive Photo Recovery System",
+        description="Paisley Ponytail (the Webshots Resurrector)  -  Internet Archive Photo Recovery System",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "examples:\n"
