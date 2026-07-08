@@ -10,6 +10,11 @@
 
 Webshots hosted 14 million users' photos from 1995 until December 2012, when its final owner deleted everything. Archive Team scrambled an emergency crawl in the last weeks and hauled 105.9 TB into the Internet Archive — then the extraction tooling died in 2016 and the wreckage sat locked in 2,437 fifty-gigabyte WARC blobs for a decade.
 
+Whether you're about to solve a 20-year-old mystery or surfing for the most
+devastating blackmail material for your 30th high school reunion, chances are
+the 105.9 TB of compressed image data sitting in the Webshots archive has what
+you're looking for.
+
 The photos are still in there. This is the recovery aircraft.
 
 ---
