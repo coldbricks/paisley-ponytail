@@ -22,10 +22,11 @@ The newest matching file wins (except the auto-generated `hf_bed.wav`).
 
 The app synthesizes `hf_bed.wav`: quiet server-room ambience — a
 continuous faint **400 Hz hum** (aircraft electrical power frequency)
-over a fan/HVAC noise floor, one faint monitor beep roughly every
-15 seconds, and once per 45 s loop the **ARTCC ringer** heard from
-across the room — the real thing (`distant_ringer.wav`, pre-muffled),
-mixed so quiet it's barely there. No squelch breaks, nothing keys up.
+over a fan/HVAC noise floor, and one faint monitor beep roughly every
+15 seconds. No squelch breaks, nothing keys up.
+
+Heads up: any `.wav` you put in this folder is used as a looping
+ambience bed. Don't park one-shot sounds here.
 
 User-supplied ambient loops in this folder still override the default
 (if present).

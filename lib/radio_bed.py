@@ -2,9 +2,13 @@
 
 Default: synthesized equipment-room ambience — a continuous faint
 400 Hz hum (aircraft electrical power frequency), a whisper of noise
-floor, one faint beep roughly every 15 seconds, and once per loop the
-sector ringer heard from across the room: very quiet, muffled by
-distance. No squelch breaks.
+floor, and one faint beep roughly every 15 seconds. Nothing else; no
+squelch breaks, no ringer.
+
+CAUTION: any .wav dropped into assets/radio/ is treated as a
+user-supplied ambience LOOP and overrides the default bed. Never
+store one-shot stems here — a 1.7 s ring looping forever is how we
+learned this.
 
 Optional: drop custom loops in assets/radio/ (.wav/.mp3/.ogg).
 Playback: pygame if available, else winsound loop for .wav.
@@ -24,16 +28,18 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent
 _RADIO_DIR = _ROOT / "assets" / "radio"
 _DEFAULT_BED = _RADIO_DIR / "hf_bed.wav"
-# v8: server-room ambience — continuous 400 Hz hum + fan floor, faint beep
-# ~every 15 s, the real ARTCC ringer once per loop from across the room
-# (distant_ringer.wav stem), mixed BELOW the hum floor. Squelch breaks removed.
-_BED_VERSION = 8
+# v9: server-room ambience — continuous 400 Hz hum + fan floor, faint beep
+# ~every 15 s. Nothing else. (v7-v8 mixed in a distant ARTCC ringer; the
+# stem file in assets/radio/ got picked up as a USER bed and looped the
+# raw ring at full level. Removed entirely.)
+_BED_VERSION = 9
 _BED_VER_FILE = _RADIO_DIR / ".hf_bed_version"
 
 _play_lock = threading.Lock()
 _playing = False
 _stop_flag = False
 _mode: str | None = None
+_session = 0  # bumped on every start/stop; stale warm-ups check it and bail
 
 
 def radio_dir() -> Path:
@@ -116,44 +122,6 @@ def ensure_default_hf_bed(seconds: float = 45.0, rate: int = 22050) -> Path:
             return math.exp(-6.0 * (local - BEEP_LEN) / BEEP_TAIL)
         return 0.0
 
-    # Distant sector ringer: the REAL ARTCC ringer, heard from across
-    # the room once per loop. Ships as a pre-muffled stem
-    # (assets/radio/distant_ringer.wav — low-passed at 900 Hz, peak 0.7);
-    # mixed here so quiet it's barely there. Synth D-power fallback only
-    # if the stem file is gone.
-    RINGER_AT = 28.0
-    RINGER_HOLD = 0.38
-    RINGER_GAP = 0.16
-    _D3, _A3, _D4 = 146.83, 220.0, 293.66
-
-    ringer_stem: list[float] = []
-    stem_path = _RADIO_DIR / "distant_ringer.wav"
-    if stem_path.is_file():
-        try:
-            with wave.open(str(stem_path)) as rw:
-                if rw.getsampwidth() == 2 and rw.getnchannels() == 1:
-                    raw = rw.readframes(rw.getnframes())
-                    vals = struct.unpack(f"<{len(raw) // 2}h", raw)
-                    step = rw.getframerate() / rate
-                    pos = 0.0
-                    while pos < len(vals):
-                        ringer_stem.append(vals[int(pos)] / 32768.0)
-                        pos += step
-        except Exception:
-            ringer_stem = []
-
-    def ringer_env(t: float) -> float:
-        for k in (0, 1):
-            local = t - (RINGER_AT + k * (RINGER_HOLD + RINGER_GAP))
-            if local < 0 or local > RINGER_HOLD + 0.14:
-                continue
-            if local < 0.035:
-                return local / 0.035          # smeared attack
-            if local < RINGER_HOLD:
-                return 1.0
-            return math.exp(-5.0 * (local - RINGER_HOLD) / 0.14)
-        return 0.0
-
     for i in range(n):
         t = i / rate
         white, seed = _noise(seed)
@@ -175,23 +143,7 @@ def ensure_default_hf_bed(seconds: float = 45.0, rate: int = 22050) -> Path:
         be = beep_env(t)
         beep = be * 0.026 * math.sin(2 * math.pi * 1020.0 * t) if be else 0.0
 
-        # Distant ringer — SUPER quiet, under the hum. If you notice it,
-        # it's too loud; it should register only when you listen for it.
-        ringer = 0.0
-        if ringer_stem:
-            ri = i - int(rate * RINGER_AT)
-            if 0 <= ri < len(ringer_stem):
-                ringer = 0.012 * ringer_stem[ri]
-        else:
-            re_ = ringer_env(t)
-            if re_:
-                ringer = re_ * 0.020 * (
-                    math.sin(2 * math.pi * _D3 * t)
-                    + 0.8 * math.sin(2 * math.pi * _A3 * t)
-                    + 0.5 * math.sin(2 * math.pi * _D4 * t)
-                ) / 2.3
-
-        sample = floor + hum + beep + ringer
+        sample = floor + hum + beep
 
         edge = int(rate * 0.04)
         fade = 1.0
@@ -213,18 +165,37 @@ def ensure_default_hf_bed(seconds: float = 45.0, rate: int = 22050) -> Path:
 
 
 def start_intro_radio(*, volume: float = 0.13) -> str:
-    """Start ambient bed for intro. Returns status string for UI."""
-    global _playing, _stop_flag, _mode
+    """Start ambient bed for intro. Returns status string for UI.
+
+    First run synthesizes ~45 s of audio, which takes real seconds —
+    that work happens on a daemon thread so the front door never
+    freezes. Playback starts when the bed is ready, unless the intro
+    already ended (session token invalidates a stale warm-up).
+    """
+    global _stop_flag, _session
     with _play_lock:
         stop_intro_radio()
         _stop_flag = False
-        try:
-            ensure_default_hf_bed()
-        except Exception:
-            pass
+        _session += 1
+        token = _session
+    threading.Thread(
+        target=_warmup_and_play, args=(token, volume), daemon=True
+    ).start()
+    return "radio bed warming up"
+
+
+def _warmup_and_play(token: int, volume: float) -> None:
+    global _playing, _mode
+    try:
+        ensure_default_hf_bed()
+    except Exception:
+        pass
+    with _play_lock:
+        if token != _session or _stop_flag:
+            return  # intro ended while we were synthesizing — stay silent
         files = find_radio_files()
         if not files:
-            return "radio silent (no files)"
+            return
 
         path = files[0]
         try:
@@ -237,7 +208,7 @@ def start_intro_radio(*, volume: float = 0.13) -> str:
             pygame.mixer.music.play(loops=-1)
             _playing = True
             _mode = "pygame"
-            return f"radio bed  ·  {path.name}  ·  loop"
+            return
         except Exception:
             pass
 
@@ -254,17 +225,15 @@ def start_intro_radio(*, volume: float = 0.13) -> str:
                 )
                 _playing = True
                 _mode = "winsound"
-                return f"radio bed  ·  {path.name}  ·  loop"
-            except Exception as exc:
-                return f"radio silent ({exc})"
-
-        return f"radio silent (need pygame for {path.suffix} or use .wav)"
+            except Exception:
+                pass
 
 
 def stop_intro_radio() -> None:
     """Stop ambient bed (intro end / sector open)."""
-    global _playing, _stop_flag, _mode
+    global _playing, _stop_flag, _mode, _session
     _stop_flag = True
+    _session += 1  # a warm-up still synthesizing must not start playback
     if not _playing and _mode is None:
         return
     try:
