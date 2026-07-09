@@ -57,21 +57,21 @@ _DOOR_CHIME = os.path.join(_ROOT, "assets", "door_chime.wav")
 _RINGER_LEGACY = os.path.join(_ROOT, "assets", "artcc_ringer.wav")
 _RINGER = _DOOR_CHIME if os.path.isfile(_DOOR_CHIME) else _RINGER_LEGACY
 
-# Public regulatory anchor (14 CFR § 65.45) + NWS-style "danger to life and
-# property" formulation. This is a simulation UI — not operational ATC.
+# Public regulatory anchor (FAA Order JO 7110.65) + NWS-style "danger to
+# life and property" formulation. This is a simulation UI — not operational
+# ATC. (Not 14 CFR 65.45 — that's tower operators; this glass is radar.)
 _WARNING_BODY = """\
 WARNING
 
 DANGER TO LIFE AND PROPERTY MAY RESULT IF AIR TRAFFIC CONTROL DUTIES
-ARE NOT PERFORMED IN ACCORDANCE WITH THE LIMITATIONS OF THE CERTIFICATE
-AND THE PROCEDURES AND PRACTICES PRESCRIBED IN AIR TRAFFIC CONTROL
-MANUALS OF THE FEDERAL AVIATION ADMINISTRATION.
+ARE NOT PERFORMED IN ACCORDANCE WITH THE PROCEDURES AND PRACTICES
+PRESCRIBED IN AIR TRAFFIC CONTROL ORDERS OF THE FEDERAL AVIATION
+ADMINISTRATION.
 
-14 CFR § 65.45 — Performance of duties.
-  (a) An air traffic control tower operator shall perform his duties in
-      accordance with the limitations on his certificate and the procedures
-      and practices prescribed in air traffic control manuals of the FAA,
-      to provide for the safe, orderly, and expeditious flow of air traffic.
+FAA Order JO 7110.65 — Air Traffic Control.
+  2-1-1 ATC SERVICE. The primary purpose of the ATC system is to prevent
+      a collision involving aircraft operating in the system, and to
+      provide a safe, orderly, and expeditious flow of air traffic.
 
 JO 7110.65 Appendix A — Transfer of Position Responsibility.
   Specialists engaged in position relief share equal responsibility for the
@@ -399,6 +399,12 @@ class ScopeApp:
         self._adsb_layout_dirty = True
         self._adsb_layout_size = (0, 0)
         self._adsb_seen: set[str] = set()
+        # Mission radar: the albums ARE the traffic. Each found album is
+        # a target — flashing until the pull starts working it, solid
+        # while photos land, white when its count is home.
+        self._mission: dict[str, dict] = {}
+        self._mission_order: list[str] = []
+        self._mission_sweep = False
         self._adsb_error = ""
         self._adsb_fetching = False
 
@@ -1172,6 +1178,14 @@ class ScopeApp:
             })
         return targets
 
+    def _mission_place(self, idx: int) -> tuple[float, float]:
+        """Golden-angle spiral around home plate: deterministic, spreads
+        like real traffic, and no two targets land on each other."""
+        import math as _m
+        ang = _m.radians(90 + idx * 137.508)
+        rad = min(0.13 + 0.034 * _m.sqrt(idx), 0.40)
+        return 0.46 + rad * _m.cos(ang) * 1.12, 0.45 + rad * _m.sin(ang)
+
     def _draw_map(self):
         """N90 theater from assets/videomap/n90.json (public geo — not vice/GPL)."""
         c = self.canvas
@@ -1381,6 +1395,7 @@ class ScopeApp:
         c.delete("traffic")
         c.delete("adsb")
         c.delete("trail")
+        c.delete("mission")
         w = max(c.winfo_width(), 100)
         h = max(c.winfo_height(), 100)
         flash = self._strobe_phase in (0, 1, 4, 5)
@@ -1488,6 +1503,55 @@ class ScopeApp:
                 drawn += 1
                 if drawn >= 80:
                     break  # glass readability hard cap
+
+        # ── Mission radar: the albums ARE the traffic ──
+        # Interrogation sweep while the archive is being searched
+        if self._mission_sweep:
+            import math as _m
+            cx, cy = w * 0.46, h * 0.45
+            r = min(w, h) * 0.46
+            ang = (self._tick * 4.0) % 360
+            for k, (colkey, wd) in enumerate(
+                (("green", 2), ("muted", 1), ("dim", 1), ("chart", 1))
+            ):
+                a = _m.radians(ang - k * 6)
+                c.create_line(
+                    cx, cy, cx + r * _m.cos(a), cy + r * _m.sin(a),
+                    fill=C[colkey], width=wd, tags="mission",
+                )
+        # Album targets: flash on find, solid while landing, white = home
+        if self._mission:
+            blink_on = (self._tick // 5) % 2 == 0
+            for aid in self._mission_order:
+                t = self._mission[aid]
+                x, y = w * t["xf"], h * t["yf"]
+                st = t["state"]
+                landed = st == "solid" and t["n"] and t["done"] >= t["n"]
+                col = C["white"] if landed else C["green"]
+                c.create_polygon(
+                    x, y - 6, x + 6, y, x, y + 6, x - 6, y,
+                    outline=col,
+                    fill=col if st == "solid" else "",
+                    width=2, tags="mission",
+                )
+                if st == "flash" and not blink_on:
+                    continue  # symbol stays painted; the block blinks
+                if st == "solid":
+                    line2 = f"{min(t['done'], t['n'])}/{t['n']}"
+                elif t["n"]:
+                    line2 = f"{t['n']} PHOTOS"
+                else:
+                    line2 = "NO TARGETS"
+                c.create_line(x, y, x + 11, y - 15, fill=C["dim"], tags="mission")
+                c.create_text(
+                    x + 11, y - 24, text=t["title"], fill=col,
+                    font=F(9, "bold"), anchor="w", tags="mission",
+                )
+                c.create_text(
+                    x + 11, y - 10, text=line2,
+                    fill=C["yellow"] if st == "solid" and not landed else C["muted"],
+                    font=F(8), anchor="w", tags="mission",
+                )
 
         # ── Ambient ghost traffic (dim) when ADS-B off or as underlay ──
         # Unlabeled on purpose: ambience must never read as live traffic
@@ -3031,10 +3095,39 @@ class ScopeApp:
                 if kind == "adsb":
                     self._apply_adsb(payload if isinstance(payload, dict) else {})
                     continue
+                if kind == "mission_start":
+                    self._mission = {}
+                    self._mission_order = []
+                    self._mission_sweep = True
+                    continue
+                if kind == "album_found":
+                    aid, title, n = payload
+                    xf, yf = self._mission_place(len(self._mission_order))
+                    self._mission[aid] = {
+                        "title": (title or aid)[:14].upper(), "n": n,
+                        "done": 0, "state": "flash", "xf": xf, "yf": yf,
+                    }
+                    self._mission_order.append(aid)
+                    continue
+                if kind == "mission_board":
+                    self._mission_sweep = False
+                    continue
+                if kind == "mission_photo":
+                    t = self._mission.get(payload)
+                    if t:
+                        t["done"] += 1
+                        t["state"] = "solid"
+                    continue
                 if kind == "phase":
                     name, info = payload
                     self._phase = name
+                    if name in ("RECON", "SCAN"):
+                        self._mission_sweep = True
+                    else:
+                        self._mission_sweep = False
                     if name == "PULL":
+                        for t in self._mission.values():
+                            t["state"] = "solid"
                         self._pull_total = info.get("total", 0)
                         self._pull_board = info.get("albums", 0)
                         self._set_instr(
@@ -3127,6 +3220,10 @@ class ScopeApp:
             return
         self._xmit("RECON", f"Target {name} — interrogating CDX", "aqua")
         self._set_truth(None)
+        # New interrogation: clear the mission board, start the sweep
+        self._mission = {}
+        self._mission_order = []
+        self._mission_sweep = True
         self._set_instr(
             target=name,
             phase="RECON" if self._pro else "checking the archive",
@@ -3190,11 +3287,15 @@ class ScopeApp:
                             entries, meta = await engine.load_album(aurl, ts)
                             n = len(entries)
                             total += n
-                            counts.append((meta.get("title") or cat, aid, n))
+                            title = meta.get("title") or cat
+                            counts.append((title, aid, n))
+                            # each counted album pops onto the glass, flashing
+                            self._q.put(("album_found", (aid, title, n), None))
                         self._last_albums = counts
                         self._last_user = name
                     finally:
                         self._live_engine = None
+                        self._q.put(("mission_board", None, None))
 
                     def ui():
                         self._xmit(
@@ -3281,7 +3382,12 @@ class ScopeApp:
                         await cmd_pull(
                             name, engine, out, deep=deep, no_open=True,
                             stats=stats,
-                            on_photo=lambda rec, alb: self._q.put(("photo", rec, None)),
+                            on_photo=lambda rec, alb: (
+                                self._q.put(("photo", rec, None)),
+                                self._q.put(
+                                    ("mission_photo", (alb or {}).get("id"), None)
+                                ),
+                            ),
                             on_phase=lambda ph, **info: self._q.put(("phase", (ph, info), None)),
                         )
                 finally:
