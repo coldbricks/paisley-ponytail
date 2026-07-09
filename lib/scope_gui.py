@@ -47,7 +47,7 @@ from lib.prefs import load_prefs, save_pref
 from lib.remarks import load_remarks, remark_for
 from lib.truth import TRUTH, classify_recovery, mission_report, weather_state
 
-from lib.theme import C, F, LAYOUT, synthesize_door_chime
+from lib.theme import C, F, LAYOUT, MF, synthesize_door_chime
 
 # Palette + type scale: lib.theme (C, F, LAYOUT)
 
@@ -198,6 +198,9 @@ _MANTRA_STRIP = (
 # Format: XXXXX-R##  or  XXXXX##-R## (5 letters, optional digits, radar id)
 _SECTOR_BOARD = [
     "PORTR-R41",
+    "DEBBY-R22",
+    "SPRKL-R33",
+    "HEELZ-R66",
     "PYSLY-R90",   # Paisley — this facility
     "RACHL-R67",   # Rachel
     "TAMMY-R11",   # Tammy
@@ -405,6 +408,9 @@ class ScopeApp:
         self._mission: dict[str, dict] = {}
         self._mission_order: list[str] = []
         self._mission_sweep = False
+        # ABORT handles for the running job's loop/task (worker thread)
+        self._abort_loop = None
+        self._abort_task = None
         self._adsb_error = ""
         self._adsb_fetching = False
 
@@ -779,10 +785,17 @@ class ScopeApp:
             "pady": LAYOUT["btn_pady"],
         }
 
-        def mkbtn(parent, text, cmd, bg, fg="#000000"):
+        def mkbtn(parent, text, cmd, bg, fg="#000000", allow_busy=False):
             b = Label(parent, text=text, bg=bg, fg=fg, **btn_style)
-            b.bind("<Button-1>", lambda e: cmd() if not self._busy else None)
-            b.bind("<Enter>", lambda e: b.configure(bg=C["white"]) if not self._busy else None)
+            b.bind(
+                "<Button-1>",
+                lambda e: cmd() if (allow_busy or not self._busy) else None,
+            )
+            b.bind(
+                "<Enter>",
+                lambda e: b.configure(bg=C["white"])
+                if (allow_busy or not self._busy) else None,
+            )
             b.bind("<Leave>", lambda e: b.configure(bg=bg))
             b.pack(fill=X, padx=12, pady=4)
             return b
@@ -799,6 +812,14 @@ class ScopeApp:
             self.btn_gallery = mkbtn(
                 right, "■  OPEN GALLERY  —  last hangar contact sheet", self._on_gallery, C["yellow"]
             )
+            self.btn_hangar = mkbtn(
+                right, "■  HANGAR  —  open the folder in Explorer",
+                self._on_hangar, C["gray"], allow_busy=True,
+            )
+            self.btn_abort = mkbtn(
+                right, "■  ABORT  —  stop now, keep everything landed",
+                self._on_abort, C["red"], fg=C["white"], allow_busy=True,
+            )
         else:
             self.btn_search = mkbtn(right, "■  SEARCH  —  look first (recommended)", self._on_search, C["green"])
             self.btn_pull = mkbtn(right, "■  PULL  —  save all the photos", self._on_pull, C["green"])
@@ -810,6 +831,14 @@ class ScopeApp:
             )
             self.btn_gallery = mkbtn(
                 right, "■  OPEN GALLERY  —  see the photos", self._on_gallery, C["yellow"]
+            )
+            self.btn_hangar = mkbtn(
+                right, "■  OPEN FOLDER  —  watch the photos arrive",
+                self._on_hangar, C["gray"], allow_busy=True,
+            )
+            self.btn_abort = mkbtn(
+                right, "■  STOP  —  keep what's saved so far",
+                self._on_abort, C["red"], fg=C["white"], allow_busy=True,
             )
 
         # Mission instruments — the glass always tells the truth about
@@ -1225,7 +1254,7 @@ class ScopeApp:
             )
             c.create_text(
                 cx + r * 0.72, cy - r * 0.72,
-                text=label, fill=C["muted"], font=F(9, "bold"), tags="static",
+                text=label, fill=C["dim"], font=MF(9, "bold"), tags="static",
             )
 
         c.create_line(0, h * 0.5, w, h * 0.5, fill=C["line"], dash=(3, 8), width=1, tags="static")
@@ -1242,7 +1271,7 @@ class ScopeApp:
         coast = vm.get("coast") or []
         if coast:
             _poly(coast, fill=C["chart"], width=3, smooth=True)
-            _poly(coast, fill=C["green"], width=1, smooth=True)
+            _poly(coast, fill=C["map"], width=1, smooth=True)
         nj = vm.get("nj_coast") or []
         if nj:
             _poly(nj, fill=C["chart"], width=2, smooth=True)
@@ -1262,47 +1291,53 @@ class ScopeApp:
             c.create_text(
                 mx, my - 10,
                 text=wa.get("label", wa.get("id", "")),
-                fill=cold_txt, font=F(12, "bold"), tags="static",
+                fill=cold_txt, font=MF(12, "bold"), tags="static",
             )
             c.create_text(
                 mx, my + 12,
                 text=wa.get("status", "COLD"),
-                fill=cold_txt, font=F(10, "bold"), tags="static",
+                fill=cold_txt, font=MF(10, "bold"), tags="static",
             )
 
+        # Chart ink discipline: the video map lives BELOW target
+        # brightness — dim palette, unscaled MF() type — so targets and
+        # datablocks always float above it. Professional also drops the
+        # water/footer prose: a working sector doesn't label the ocean.
         for ap in vm.get("airports") or []:
             x, y = project_point(ap["lat"], ap["lon"], w, h, bbox)
-            col = C["yellow"] if ap.get("primary") else C["green"]
+            col = C["map_hi"] if ap.get("primary") else C["map"]
             c.create_text(
                 x, y,
                 text=ap.get("label", ap.get("id", "")),
-                fill=col, font=F(int(ap.get("size", 10)), "bold"), tags="static",
+                fill=col, font=MF(int(ap.get("size", 10)), "bold"), tags="static",
             )
 
         for fx in vm.get("fixes") or []:
             x, y = project_point(fx["lat"], fx["lon"], w, h, bbox)
-            col = C["aqua"] if fx.get("role") == "gate" else C["green"]
+            col = C["map_gate"] if fx.get("role") == "gate" else C["map"]
             c.create_text(
                 x, y,
                 text=fx.get("label", fx.get("id", "")),
-                fill=col, font=F(int(fx.get("size", 9)), "bold"), tags="static",
+                fill=col, font=MF(int(fx.get("size", 9)), "bold"), tags="static",
             )
 
         for lab in vm.get("labels") or []:
-            x, y = project_point(lab["lat"], lab["lon"], w, h, bbox)
             role = lab.get("role", "")
+            if self._pro and role in ("water", "footer"):
+                continue
+            x, y = project_point(lab["lat"], lab["lon"], w, h, bbox)
             if role == "water":
                 col = C["chart"]
             elif role == "route":
-                col = C["green"]
+                col = C["map"]
             elif role == "footer":
-                col = "#6a8a9a"
+                col = "#4a6572"
             else:
-                col = C["muted"]
+                col = C["dim"]
             c.create_text(
                 x, y,
                 text=lab.get("text", ""),
-                fill=col, font=F(int(lab.get("size", 10)), "bold"), tags="static",
+                fill=col, font=MF(int(lab.get("size", 10)), "bold"), tags="static",
             )
 
         self._draw_traffic()
@@ -3071,14 +3106,62 @@ class ScopeApp:
             return
 
         def worker():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
             try:
-                result = asyncio.run(coro_factory())
+                task = loop.create_task(coro_factory())
+                # ABORT reaches in through these; a cancelled pull lands
+                # on the same rails as Ctrl+C — progress saved, manifest
+                # merged, nothing demoted.
+                self._abort_loop, self._abort_task = loop, task
+                result = loop.run_until_complete(task)
                 self._q.put(("ok", result, on_done_msg))
+            except asyncio.CancelledError:
+                self._q.put(("aborted", None, None))
             except Exception as exc:
                 self._q.put(("err", str(exc), None))
+            finally:
+                self._abort_loop = None
+                self._abort_task = None
+                try:
+                    loop.close()
+                except Exception:
+                    pass
 
         self._set_busy(True)
         threading.Thread(target=worker, daemon=True).start()
+
+    def _on_abort(self):
+        """ABORT: cancel the running job. Everything already landed stays
+        landed; a pull writes its manifest exactly like a Ctrl+C would."""
+        if not self._busy:
+            self._xmit("TWR", "Nothing to abort — position is quiet", "dim")
+            return
+        loop, task = self._abort_loop, self._abort_task
+        if loop is None or task is None:
+            return
+        self._xmit("TWR", "ABORT — stopping after the current transmission", "orange")
+        try:
+            loop.call_soon_threadsafe(task.cancel)
+        except Exception:
+            pass
+
+    def _on_hangar(self):
+        """Open the output folder in Explorer — works mid-pull, so you
+        can watch the photos arrive instead of wondering if it's hung."""
+        name = (self._name() or self._last_user or "").strip()
+        base = os.path.abspath("output")
+        path = os.path.join(base, name) if name else base
+        if not os.path.isdir(path):
+            path = base
+        if not os.path.isdir(path):
+            self._xmit("GND", "No hangar yet — photos appear once a pull starts", "yellow")
+            return
+        try:
+            os.startfile(path)  # type: ignore[attr-defined]
+        except Exception:
+            webbrowser.open("file:///" + path.replace("\\", "/"))
+        self._xmit("GND", f"Hangar open in Explorer: {path}", "aqua")
 
     def _drain_queue(self):
         try:
@@ -3094,6 +3177,17 @@ class ScopeApp:
                     continue
                 if kind == "adsb":
                     self._apply_adsb(payload if isinstance(payload, dict) else {})
+                    continue
+                if kind == "aborted":
+                    self._set_busy(False)
+                    self._mission_sweep = False
+                    self._xmit("TWR", "ABORT complete — scope quiet, everything landed is kept", "orange")
+                    self._set_instr(
+                        phase="—",
+                        next_step="Run the same command again — it resumes "
+                        "where it stopped.",
+                    )
+                    self.status.set("ABORTED — PROGRESS SAVED")
                     continue
                 if kind == "mission_start":
                     self._mission = {}

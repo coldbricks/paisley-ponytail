@@ -35,6 +35,9 @@ C: dict[str, str] = {
     "magenta": "#E040FF",
     "gray": "#B8C4BA",
     "chart": "#1e3a28",
+    "map": "#2e5340",      # videomap base — always under target brightness
+    "map_hi": "#41715a",   # primary airport emphasis (still background)
+    "map_gate": "#1e5a66", # arrival gates — dim aqua
     "warn": "#3d4a1a",
     "chip_fg": "#001408",     # text on bright chips
     "zulu_bg": "#000000",
@@ -55,6 +58,15 @@ _MIN = 10
 def F(size: int, weight: str = "") -> tuple[Any, ...]:
     """Return a tkinter font tuple, scaled for readability."""
     s = max(_MIN, int(round(size * _SCALE)))
+    if weight:
+        return (_FONT_FAMILY, s, weight)
+    return (_FONT_FAMILY, s)
+
+
+def MF(size: int, weight: str = "") -> tuple[Any, ...]:
+    """Map-layer font: UNSCALED. The video map is background chart ink —
+    it must never compete with datablocks, which ride the F() scale."""
+    s = max(8, int(size))
     if weight:
         return (_FONT_FAMILY, s, weight)
     return (_FONT_FAMILY, s)
