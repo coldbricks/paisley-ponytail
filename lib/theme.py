@@ -46,8 +46,9 @@ C: dict[str, str] = {
 # them up so laptop kitchen duty (1080p / 1440p) stays readable.
 
 _FONT_FAMILY = "Consolas"
-# Global bump — user feedback: body text was too small.
-_SCALE = 1.45
+# Global bump — body text was too small at 1.0; 1.45 clipped button and
+# hint text inside the fixed-width right panel. 1.38 is the fit point.
+_SCALE = 1.38
 _MIN = 10
 
 
@@ -80,7 +81,7 @@ LAYOUT = {
     "strip_h": 34,
     "sector_h": 36,
     "channel_h": 38,
-    "right_w": 500,
+    "right_w": 576,  # widest button label + padding at F(10) — no truncation
     "pad_body": 10,
     "btn_pady": 12,
     "entry_ipady": 16,

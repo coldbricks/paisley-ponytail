@@ -1,8 +1,10 @@
 """Optional ambient radio bed for the scope intro.
 
-Default: synthesized HF static + faint squelch *breaks* (no sample pack
-required). Guided by real squelch envelopes (abrupt open → rush → long
-decay) — not roger beeps / walkie chirps.
+Default: synthesized equipment-room ambience — a continuous faint
+400 Hz hum (aircraft electrical power frequency), a whisper of noise
+floor, one faint beep roughly every 15 seconds, and once per loop the
+sector ringer heard from across the room: very quiet, muffled by
+distance. No squelch breaks.
 
 Optional: drop custom loops in assets/radio/ (.wav/.mp3/.ogg).
 Playback: pygame if available, else winsound loop for .wav.
@@ -22,8 +24,10 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent
 _RADIO_DIR = _ROOT / "assets" / "radio"
 _DEFAULT_BED = _RADIO_DIR / "hf_bed.wav"
-# v5: rare faint 400 Hz under ~15% of squelch opens (aviation power-freq nod)
-_BED_VERSION = 5
+# v7: server-room ambience — continuous 400 Hz hum + fan floor, faint beep
+# ~every 15 s, the real ARTCC ringer once per loop from across the room
+# (distant_ringer.wav stem). Squelch breaks removed.
+_BED_VERSION = 7
 _BED_VER_FILE = _RADIO_DIR / ".hf_bed_version"
 
 _play_lock = threading.Lock()
@@ -67,12 +71,16 @@ def _noise(seed: int) -> tuple[float, int]:
     return (seed / 0x7FFFFFFF) * 2.0 - 1.0, seed
 
 
-def ensure_default_hf_bed(seconds: float = 16.0, rate: int = 22050) -> Path:
-    """Closed-squelch hiss + rare open breaks with realistic tails.
+def ensure_default_hf_bed(seconds: float = 45.0, rate: int = 22050) -> Path:
+    """Server-room ambience. Quiet. Nothing keys up.
 
-    Envelope language taken from real squelch samples (guide only):
-      hard open ~5–10 ms → open rush 40–120 ms → exp decay 80–250 ms.
-    No pure-tone roger chirps.
+    Layers, all faint:
+      - continuous 400 Hz hum (aircraft electrical power frequency) with
+        a slow organic wobble + soft 800 Hz harmonic
+      - broadband fan/HVAC floor (filtered noise, no squelch events)
+      - one short 1 kHz beep roughly every 15 s (jittered, not a metronome)
+      - the sector ringer once per loop, heard from across the room:
+        fundamentals only, soft edges, very quiet
     """
     radio_dir()
     ver_ok = (
@@ -90,95 +98,101 @@ def ensure_default_hf_bed(seconds: float = 16.0, rate: int = 22050) -> Path:
     lp = 0.0
     bp = 0.0
 
-    # (start_sec, open_hold_sec, tail_sec, intensity 0..1, with_400hz)
-    # irregular — like someone keying nearby, not a metronome
-    # ~2/9 breaks (~22%) get a whisper of 400 Hz under the open only —
-    # aviation AC power-freq nod. NOT a constant blanker. Hardly there.
-    events = [
-        (1.15, 0.055, 0.18, 0.55, False),
-        (2.90, 0.040, 0.12, 0.40, False),
-        (4.60, 0.090, 0.22, 0.70, True),   # 400 Hz
-        (6.10, 0.035, 0.10, 0.35, False),
-        (7.85, 0.070, 0.20, 0.60, False),
-        (9.40, 0.045, 0.14, 0.45, False),
-        (11.20, 0.100, 0.24, 0.75, True),  # 400 Hz
-        (12.80, 0.050, 0.16, 0.50, False),
-        (14.50, 0.065, 0.19, 0.55, False),
-    ]
+    # Faint monitor beeps ~every 15 s — jittered so the loop breathes.
+    # Wrap gap (6.5 + 45 - 36.2) ≈ 15.3 s keeps the cadence across loops.
+    beeps = [6.5, 21.8, 36.2]
+    BEEP_LEN = 0.14
+    BEEP_TAIL = 0.10
 
-    def gate(t: float) -> tuple[float, float, float]:
-        """Returns (noise_open 0..1, tail_ring 0..1, hz400_amt 0..1)."""
-        noise_o, ring, hz400 = 0.0, 0.0, 0.0
-        for start, hold, tail, inten, use_400 in events:
-            for base in (0.0, -seconds, seconds):
-                local = t - (start + base)
-                if local < -0.015 or local > hold + tail:
-                    continue
-                if local < 0:
-                    e = inten * 0.2 * (1.0 + local / 0.015)
-                elif local < 0.007:
-                    e = inten * (0.25 + 0.75 * (local / 0.007))
-                elif local < hold:
-                    e = inten
-                else:
-                    u = (local - hold) / max(tail, 1e-6)
-                    e = inten * math.exp(-3.2 * u)
-                    ring = max(ring, inten * math.exp(-5.5 * u) * (1.0 - u))
-                noise_o = max(noise_o, e)
-                # 400 Hz only while truly open / early tail, and only flagged events
-                if use_400 and local >= 0 and local < hold + tail * 0.45:
-                    # track envelope, keep quieter than the static rush
-                    hz400 = max(hz400, e * 0.55)
-        return max(0.0, noise_o), max(0.0, ring), max(0.0, hz400)
+    def beep_env(t: float) -> float:
+        for start in beeps:
+            local = t - start
+            if local < 0 or local > BEEP_LEN + BEEP_TAIL:
+                continue
+            if local < 0.008:
+                return local / 0.008
+            if local < BEEP_LEN:
+                return 1.0
+            return math.exp(-6.0 * (local - BEEP_LEN) / BEEP_TAIL)
+        return 0.0
+
+    # Distant sector ringer: the REAL ARTCC ringer, heard from across
+    # the room once per loop. Ships as a pre-muffled stem
+    # (assets/radio/distant_ringer.wav — low-passed at 900 Hz, peak 0.7);
+    # mixed here so quiet it's barely there. Synth D-power fallback only
+    # if the stem file is gone.
+    RINGER_AT = 28.0
+    RINGER_HOLD = 0.38
+    RINGER_GAP = 0.16
+    _D3, _A3, _D4 = 146.83, 220.0, 293.66
+
+    ringer_stem: list[float] = []
+    stem_path = _RADIO_DIR / "distant_ringer.wav"
+    if stem_path.is_file():
+        try:
+            with wave.open(str(stem_path)) as rw:
+                if rw.getsampwidth() == 2 and rw.getnchannels() == 1:
+                    raw = rw.readframes(rw.getnframes())
+                    vals = struct.unpack(f"<{len(raw) // 2}h", raw)
+                    step = rw.getframerate() / rate
+                    pos = 0.0
+                    while pos < len(vals):
+                        ringer_stem.append(vals[int(pos)] / 32768.0)
+                        pos += step
+        except Exception:
+            ringer_stem = []
+
+    def ringer_env(t: float) -> float:
+        for k in (0, 1):
+            local = t - (RINGER_AT + k * (RINGER_HOLD + RINGER_GAP))
+            if local < 0 or local > RINGER_HOLD + 0.14:
+                continue
+            if local < 0.035:
+                return local / 0.035          # smeared attack
+            if local < RINGER_HOLD:
+                return 1.0
+            return math.exp(-5.0 * (local - RINGER_HOLD) / 0.14)
+        return 0.0
 
     for i in range(n):
         t = i / rate
         white, seed = _noise(seed)
-        # colored noise: speaker + RF mush
+        # colored noise: fan / HVAC mush
         lp = 0.90 * lp + 0.10 * white
         bp = 0.55 * bp + 0.45 * (white - lp)
 
-        open_amt, ring_amt, hz400_amt = gate(t)
+        # Fan floor — the "server room" hush, steady, no events
+        floor = 0.020 * lp + 0.007 * bp
 
-        # Closed: whisper residual. Open: rush of static.
-        closed_hiss = 0.028 * lp + 0.012 * bp
-        open_rush = open_amt * (0.48 * lp + 0.32 * bp + 0.12 * white)
+        # 400 Hz hum — the main character. Slow wobble so it breathes.
+        wobble = 0.88 + 0.12 * math.sin(2 * math.pi * 0.11 * t)
+        hum = wobble * (
+            0.030 * math.sin(2 * math.pi * 400.0 * t)
+            + 0.009 * math.sin(2 * math.pi * 800.0 * t)
+        )
 
-        # Weak carrier under open (not a roger beep — no pure end-chirp)
-        carrier = 0.0
-        if open_amt > 0.08:
-            carrier = (
-                open_amt
-                * 0.05
-                * math.sin(2 * math.pi * 420 * t)
-                * (0.75 + 0.25 * math.sin(2 * math.pi * 3.0 * t))
-            )
+        # Faint monitor beep
+        be = beep_env(t)
+        beep = be * 0.026 * math.sin(2 * math.pi * 1020.0 * t) if be else 0.0
 
-        # Soft ring-down as gate closes (filtered, short)
-        ring = 0.0
-        if ring_amt > 0.02:
-            ring = (
-                ring_amt
-                * 0.055
-                * math.sin(2 * math.pi * (640 + 90 * (1.0 - ring_amt)) * t)
-            )
+        # Distant ringer — very quiet, across the room, barely there
+        ringer = 0.0
+        if ringer_stem:
+            ri = i - int(rate * RINGER_AT)
+            if 0 <= ri < len(ringer_stem):
+                ringer = 0.030 * ringer_stem[ri]
+        else:
+            re_ = ringer_env(t)
+            if re_:
+                ringer = re_ * 0.020 * (
+                    math.sin(2 * math.pi * _D3 * t)
+                    + 0.8 * math.sin(2 * math.pi * _A3 * t)
+                    + 0.5 * math.sin(2 * math.pi * _D4 * t)
+                ) / 2.3
 
-        # 400 Hz — aircraft electrical power frequency. Tiny. Rare.
-        # Only rides selected squelch opens; never a continuous blanker.
-        aviation_400 = 0.0
-        if hz400_amt > 0.04:
-            aviation_400 = (
-                hz400_amt
-                * 0.028  # very faint
-                * math.sin(2 * math.pi * 400.0 * t)
-            )
+        sample = floor + hum + beep + ringer
 
-        # Almost subliminal pilot when closed (not 400)
-        pilot = 0.008 * math.sin(2 * math.pi * 950 * t)
-
-        sample = closed_hiss + open_rush + carrier + ring + aviation_400 + pilot
-
-        edge = int(rate * 0.06)
+        edge = int(rate * 0.04)
         fade = 1.0
         if i < edge:
             fade = i / edge

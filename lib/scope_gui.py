@@ -197,7 +197,7 @@ _MANTRA_STRIP = (
 # Sector designators — 5-letter callsign energy + -R## (radar).
 # Format: XXXXX-R##  or  XXXXX##-R## (5 letters, optional digits, radar id)
 _SECTOR_BOARD = [
-    "PORTR-R41",   # Porter
+    "SABLE-R41",
     "PYSLY-R90",   # Paisley — this facility
     "RACHL-R67",   # Rachel
     "TAMMY-R11",   # Tammy
@@ -728,7 +728,7 @@ class ScopeApp:
 
         Label(
             self._callsign_frame,
-            text="the old username  ·  half-remembered is fine  ·  then SEARCH or PULL",
+            text="the old username · half-remembered is fine · then SEARCH or PULL",
             bg="#0a140a",
             fg=C["aqua"],
             font=F(8),
@@ -1020,13 +1020,13 @@ class ScopeApp:
         for r, (key, var, color) in enumerate(rows):
             Label(
                 grid, text=key, bg="#0a100c", fg=C["muted"],
-                font=F(8, "bold"), anchor="ne", width=14,
+                font=F(8, "bold"), anchor="ne", width=16,  # "Not recoverable" = 15 chars
                 justify="right",
             ).grid(row=r, column=0, sticky="ne", padx=(0, 8), pady=1)
             Label(
                 grid, textvariable=var, bg="#0a100c", fg=color,
                 font=F(9, "bold") if self._pro else F(9),
-                anchor="nw", justify="left", wraplength=270,
+                anchor="nw", justify="left", wraplength=320,
             ).grid(row=r, column=1, sticky="nw", pady=1)
         grid.columnconfigure(1, weight=1)
 
@@ -1039,7 +1039,7 @@ class ScopeApp:
             font=F(8),
             anchor="w",
             justify="left",
-            wraplength=460,
+            wraplength=520,
             padx=8,
         )
         self._truth_banner.pack(fill=X, pady=(0, 6))

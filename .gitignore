@@ -13,6 +13,7 @@ build/
 assets/radio/*
 !assets/radio/README.md
 !assets/radio/hf_bed.wav
+!assets/radio/distant_ringer.wav
 # Internal planning docs — never ship in the public repo
 FOR_CLAUDE.md
 gForItFable.md

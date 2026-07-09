@@ -11,7 +11,7 @@
 ![Megawarcs on frequency](https://img.shields.io/badge/on%20frequency-2%2C437%20megawarcs%20%2F%20105.9%20TB-1f3d1f)
 
 ```
-ATIS PPTY  ·  PYSLY-R90  ·  v2.0
+ATIS PPTY  ·  PYSLY-R90  ·  v2.1
 You are an air traffic controller at the busiest air traffic control
 radar facility on the planet. Your traffic is deleted family photos.
 The only person who can save them is you. Good luck. We're all counting on you.

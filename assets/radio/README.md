@@ -20,14 +20,15 @@ The newest matching file wins (except the auto-generated `hf_bed.wav`).
 
 ## Default
 
-The app synthesizes `hf_bed.wav`: closed-squelch hiss and occasional
-**squelch breaks** (hard open → static rush → decaying tail).
-
-Shaped by listening to real squelch samples as a *guide only* —
-**roger / walkie beeps are never used or shipped.**
+The app synthesizes `hf_bed.wav`: quiet server-room ambience — a
+continuous faint **400 Hz hum** (aircraft electrical power frequency)
+over a fan/HVAC noise floor, one faint monitor beep roughly every
+15 seconds, and once per 45 s loop the **ARTCC ringer** heard from
+across the room — the real thing (`distant_ringer.wav`, pre-muffled),
+mixed so quiet it's barely there. No squelch breaks, nothing keys up.
 
 User-supplied ambient loops in this folder still override the default
-(if present). Keep roger-beep packs out of here.
+(if present).
 
 ## Mute
 
