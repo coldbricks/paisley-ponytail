@@ -181,6 +181,18 @@ class Engine:
         self._limiter = _RateLimiter(self.cfg.rate_delay)
         self._client: httpx.AsyncClient | None = None
         self._sem: asyncio.Semaphore | None = None
+        # Why the last request gave up. A caller that only sees `None`
+        # cannot tell "archive.org is down" (ATC ZERO) from "archive.org
+        # is up and metering us" (429 flow control) -- opposite advice.
+        # last_status: 429 = throttled, 5xx = server sick, 0 = transport.
+        # last_nid:    archive.org's X-NID header names the NETWORK it
+        #              sees us on ("Datacamp Limited" = a VPN/datacenter
+        #              exit, which their edge throttles far harder than a
+        #              residential ISP). Naming it turns an unactionable
+        #              "try later" into "drop the VPN".
+        self.last_status: int = 0
+        self.last_nid: str | None = None
+        self.last_retry_after: str | None = None
 
     async def __aenter__(self):
         self._client = httpx.AsyncClient(
@@ -237,13 +249,23 @@ class Engine:
                     if r.status_code in (429, 503):
                         # archive.org is telling everyone to slow down
                         self._limiter.cooldown(wait)
+                        self.last_nid = r.headers.get("X-NID")
+                        self.last_retry_after = r.headers.get("Retry-After")
                     await asyncio.sleep(wait)
                     continue
+                self._note_failure(r.status_code)
                 return None, r.status_code
             except httpx.HTTPError:
                 last_status = 0
                 await asyncio.sleep(_backoff(attempt))
+        self._note_failure(last_status)
         return None, last_status
+
+    def _note_failure(self, status: int) -> None:
+        """Remember WHY, so the UI can tell an outage from flow control."""
+        self.last_status = status
+        if status != 429:      # a stale NID would mislabel a real outage
+            self.last_nid = None
 
     async def _fetch_text(self, url: str) -> str | None:
         r, _ = await self._get(url)

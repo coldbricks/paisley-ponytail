@@ -48,6 +48,40 @@ from lib.ui import (
     warn,
 )
 
+# ── Failure reporting ───────────────────────────────────────────────────
+
+
+def radar_fail(phase_name: str, engine: Engine) -> None:
+    """Report a dead CDX query with the RIGHT diagnosis.
+
+    A 429 is not an outage -- archive.org is up and deliberately metering
+    us. Calling that "the radar is down" sends the user off to wait for a
+    recovery that already happened, and if they are on a VPN it will never
+    clear no matter how long they wait: archive.org throttles datacenter
+    exit IPs hard, and everyone sharing that exit spends the same quota.
+    """
+    if engine.last_status == 429:
+        fail(phase_name, "FLOW CONTROL — archive.org is metering this connection")
+        detail("[dim]Not an outage. The archive is up; it is throttling us.[/]")
+        if engine.last_nid:
+            detail(
+                f"[dim]Their edge sees this connection as:[/] "
+                f"[bold]{engine.last_nid}[/]"
+            )
+        detail("[dim]If that name isn't your home ISP, you're on a VPN — drop it[/]")
+        detail("[dim]for this run (or split-tunnel this tool). Datacenter exits[/]")
+        detail("[dim]are rate-limited far harder, and every user on that exit[/]")
+        detail("[dim]shares one quota.[/]")
+        if engine.last_retry_after:
+            detail(f"[dim]archive.org asked us to wait {engine.last_retry_after}s.[/]")
+        else:
+            detail("[dim]Otherwise: wait a few minutes and call again.[/]")
+        return
+    fail(phase_name, "ATC ZERO — archive.org radar is down")
+    detail("[dim]This is an outage, NOT an empty sky. The photos aren't gone;[/]")
+    detail("[dim]the radar is. Give it a few minutes and call again.[/]")
+
+
 # ── Recon + Scan (shared by search and pull) ────────────────────────────
 
 
@@ -66,9 +100,7 @@ async def recon(
         rows = await engine.cdx_search(url)
 
     if rows is None:
-        fail("RECON", "ATC ZERO — archive.org radar is down")
-        detail("[dim]This is an outage, NOT an empty sky. The photos aren't gone;[/]")
-        detail("[dim]the radar is. Give it a few minutes and call again.[/]")
+        radar_fail("RECON", engine)
         return None
     if not rows:
         fail(
@@ -269,7 +301,7 @@ async def cmd_find(
         with ident_status(f"{v}*"):
             result = await engine.find_usernames(v)
         if result is None:
-            fail("SWEEP", "ATC ZERO — archive.org radar is down; try again shortly")
+            radar_fail("SWEEP", engine)
             return
         found, was_truncated = result
         truncated = truncated or was_truncated
@@ -407,7 +439,7 @@ async def cmd_friends(
     with ident_status(f"{username}/people"):
         result = await engine.list_contacts(username)
     if result is None:
-        fail("TRACE", "ATC ZERO — archive.org radar is down; try again shortly")
+        radar_fail("TRACE", engine)
         return
     contacts, pages_read = result
     if not contacts:
