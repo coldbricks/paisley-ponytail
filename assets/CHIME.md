@@ -4,13 +4,12 @@
 
 ## Character
 
-**BEEP...BEEP** — two solid **D power chords** (D–A–D) with a gap.
-Hard on / hard off — **no trail-off**.
+**DING ... DING** — two rings, a beat apart. Clean stop, no click.
 
-**Production:** `variant="p4"` — D3 / A3 / D4, twice.
-
-`lib/theme.synthesize_door_chime(variant="p4")`  
-Audition pack: `assets/chime_variations/`
+The shipped wav is a produced sound asset. The synthesized D-power
+chords (`lib/theme.synthesize_door_chime`, audition pack in
+`assets/chime_variations/`) remain as the fallback if the asset
+files go missing.
 
 ## When it plays
 
