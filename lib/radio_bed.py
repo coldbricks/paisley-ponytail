@@ -28,11 +28,11 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent
 _RADIO_DIR = _ROOT / "assets" / "radio"
 _DEFAULT_BED = _RADIO_DIR / "hf_bed.wav"
-# v9: server-room ambience — continuous 400 Hz hum + fan floor, faint beep
+# v10: server-room ambience — continuous 400 Hz hum + fan floor, faint beep
 # ~every 15 s. Nothing else. (v7-v8 mixed in a distant ARTCC ringer; the
 # stem file in assets/radio/ got picked up as a USER bed and looped the
-# raw ring at full level. Removed entirely.)
-_BED_VERSION = 9
+# raw ring at full level. Removed entirely. v10: hum up a tad.)
+_BED_VERSION = 10
 _BED_VER_FILE = _RADIO_DIR / ".hf_bed_version"
 
 _play_lock = threading.Lock()
@@ -135,8 +135,8 @@ def ensure_default_hf_bed(seconds: float = 45.0, rate: int = 22050) -> Path:
         # 400 Hz hum — the main character. Slow wobble so it breathes.
         wobble = 0.88 + 0.12 * math.sin(2 * math.pi * 0.11 * t)
         hum = wobble * (
-            0.030 * math.sin(2 * math.pi * 400.0 * t)
-            + 0.009 * math.sin(2 * math.pi * 800.0 * t)
+            0.038 * math.sin(2 * math.pi * 400.0 * t)
+            + 0.011 * math.sin(2 * math.pi * 800.0 * t)
         )
 
         # Faint monitor beep
