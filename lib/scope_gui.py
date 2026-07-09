@@ -54,6 +54,10 @@ from lib.theme import C, F, LAYOUT, MF, synthesize_door_chime
 # Project assets/ next to repo root
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DOOR_CHIME = os.path.join(_ROOT, "assets", "door_chime.wav")
+# ABORT acknowledgment: autopilot-disconnect gallop — you took manual
+# control. Quieter than the grant bell on purpose. Optional asset;
+# silence if missing.
+_ALERT_GALLOP = os.path.join(_ROOT, "assets", "alert_gallop.wav")
 _RINGER_LEGACY = os.path.join(_ROOT, "assets", "artcc_ringer.wav")
 _RINGER = _DOOR_CHIME if os.path.isfile(_DOOR_CHIME) else _RINGER_LEGACY
 
@@ -3181,6 +3185,9 @@ class ScopeApp:
                 if kind == "aborted":
                     self._set_busy(False)
                     self._mission_sweep = False
+                    threading.Thread(
+                        target=_play_wav, args=(_ALERT_GALLOP,), daemon=True
+                    ).start()
                     self._xmit("TWR", "ABORT complete — scope quiet, everything landed is kept", "orange")
                     self._set_instr(
                         phase="—",
