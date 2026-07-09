@@ -2116,6 +2116,9 @@ class ScopeApp:
         self._gate = Frame(self.root, bg="#020402")
         self._gate.place(x=0, y=0, relwidth=1, relheight=1)
         self._gate.lift()
+        # Room tone under the front door too — hum, faint beeps, the
+        # distant ringer. Stops at START; never plays over real work.
+        self._start_intro_radio()
 
         border = Frame(self._gate, bg=C["aqua"], padx=3, pady=3)
         border.place(relx=0.5, rely=0.5, anchor="center",
@@ -2204,6 +2207,7 @@ class ScopeApp:
         if self._position_open:
             return
         self._position_open = True
+        self._stop_intro_radio()  # bed belongs to the door, not the work
         threading.Thread(target=_play_wav, args=(_ensure_door_chime(),), daemon=True).start()
         try:
             self._gate.destroy()

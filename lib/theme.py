@@ -154,8 +154,11 @@ def synthesize_door_chime(
     duration = float(cfg["duration"])
     gap = float(cfg.get("gap", 0.16))
     count = int(cfg.get("count", 2))
-    # Hard edges only — tiny attack to avoid click, zero release trail
+    # Hard-edged feel, but no literal hard cut: a sine sliced mid-cycle
+    # CLICKS. Tiny attack + a 12 ms release tail — too short to hear as
+    # a fade, long enough to land the wave at zero.
     attack = 0.003
+    release = 0.012
     n_partial = len(freqs)
 
     frames: list[int] = []
@@ -167,8 +170,10 @@ def synthesize_door_chime(
             t = i / rate
             if t < attack:
                 env = t / attack
+            elif t > duration - release:
+                env = max(0.0, (duration - t) / release)
             else:
-                env = 1.0  # flat hold, hard cut at end (no release)
+                env = 1.0  # flat hold
             s = 0.0
             for f in freqs:
                 phase = 2 * math.pi * f * t

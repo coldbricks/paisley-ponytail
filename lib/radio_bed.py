@@ -24,10 +24,10 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent
 _RADIO_DIR = _ROOT / "assets" / "radio"
 _DEFAULT_BED = _RADIO_DIR / "hf_bed.wav"
-# v7: server-room ambience — continuous 400 Hz hum + fan floor, faint beep
+# v8: server-room ambience — continuous 400 Hz hum + fan floor, faint beep
 # ~every 15 s, the real ARTCC ringer once per loop from across the room
-# (distant_ringer.wav stem). Squelch breaks removed.
-_BED_VERSION = 7
+# (distant_ringer.wav stem), mixed BELOW the hum floor. Squelch breaks removed.
+_BED_VERSION = 8
 _BED_VER_FILE = _RADIO_DIR / ".hf_bed_version"
 
 _play_lock = threading.Lock()
@@ -175,12 +175,13 @@ def ensure_default_hf_bed(seconds: float = 45.0, rate: int = 22050) -> Path:
         be = beep_env(t)
         beep = be * 0.026 * math.sin(2 * math.pi * 1020.0 * t) if be else 0.0
 
-        # Distant ringer — very quiet, across the room, barely there
+        # Distant ringer — SUPER quiet, under the hum. If you notice it,
+        # it's too loud; it should register only when you listen for it.
         ringer = 0.0
         if ringer_stem:
             ri = i - int(rate * RINGER_AT)
             if 0 <= ri < len(ringer_stem):
-                ringer = 0.030 * ringer_stem[ri]
+                ringer = 0.012 * ringer_stem[ri]
         else:
             re_ = ringer_env(t)
             if re_:
